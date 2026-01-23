@@ -145,9 +145,18 @@ const server = serve({
             }],
           });
         } catch (err) {
-          lastError = (err as Error).message;
+          const error = err as Error;
+          lastError = error.message;
+
+          // Include full stack trace for debugging
+          const errorDetails = [
+            `Tool: ${toolName}`,
+            `Error: ${error.message}`,
+            error.stack ? `\nStack trace:\n${error.stack}` : '',
+          ].filter(Boolean).join('\n');
+
           return Response.json({
-            content: [{ type: 'text', text: `Error: ${(err as Error).message}` }],
+            content: [{ type: 'text', text: errorDetails }],
             isError: true,
           });
         }
