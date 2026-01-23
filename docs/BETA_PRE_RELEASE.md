@@ -1,8 +1,8 @@
-# Pre-Release Beta: Primary/Secondary Architecture
+# Beta: Primary/Secondary Architecture
 
-## What This Is
+## Overview
 
-A working two-tier supervisor system that can be shipped as a beta while the full **Frankenstack** (Bridge/Doctor/Igor/Frankenstein) is completed.
+A two-tier supervisor system for the MCP server.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -10,118 +10,80 @@ A working two-tier supervisor system that can be shipped as a beta while the ful
 │  - MCP Server (stdio transport)                     │
 │  - Spawns & monitors Secondary                      │
 │  - Health checks, auto-restart, rollback            │
-│  - Snapshot management                              │
+│  - Tool change notifications                        │
 │  - NEVER crashes (delegates all risky work)         │
 └──────────────────────┬──────────────────────────────┘
-                       │ HTTP IPC
+                       │ HTTP IPC (port 3001)
                        ▼
 ┌─────────────────────────────────────────────────────┐
 │                   SECONDARY                         │
 │  - Runs with `bun --hot` (live reload)              │
-│  - Hosts dynamic tools                              │
+│  - Hosts 36 dynamic tools                           │
 │  - Security scanning on tool code                   │
 │  - Can be restarted/rolled back by Primary          │
 └─────────────────────────────────────────────────────┘
 ```
 
-## Current Status: WORKING
-
-All tests passing as of 2026-01-23:
-
-```
-✓ Health Check              PASS
-✓ Tool Listing              PASS
-✓ Tool Execution            PASS
-✓ Dynamic Tool Creation     PASS
-```
-
-## What's Implemented
+## Implementation
 
 ### Primary (`packages/supervisor/primary/`)
-| File | Lines | Function |
-|------|-------|----------|
-| `index.ts` | 541 | MCP server, subprocess management, tool routing |
-| `health-monitor.ts` | 159 | Polling health checks, failure detection, crash events |
-| `snapshot-manager.ts` | 260 | Create/restore/cleanup snapshots, retention policy |
+
+| File | Purpose |
+|------|---------|
+| `index.ts` | MCP server, subprocess management, tool routing, change notifications |
+| `health-monitor.ts` | Polling health checks, failure detection |
+| `snapshot-manager.ts` | Create/restore/cleanup snapshots |
 
 ### Secondary (`packages/supervisor/secondary/`)
-| File | Lines | Function |
-|------|-------|----------|
-| `index.ts` | 195 | HTTP server for IPC, tool execution, file watching |
-| `tool-loader.ts` | 342 | Hot-reload, security scan, dynamic tool creation |
+
+| File | Purpose |
+|------|---------|
+| `index.ts` | HTTP server for IPC, tool execution, file watching |
+| `tool-loader.ts` | Hot-reload, security scan, dynamic tool creation |
+| `tools/*.ts` | 36 dynamic tool implementations |
 
 ### Shared (`packages/supervisor/shared/`)
-| File | Lines | Function |
-|------|-------|----------|
-| `types.ts` | 508 | Full type definitions for entire architecture |
-| `ipc.ts` | 384 | HTTP client, event emitter, fallback chain, task queue |
 
-### Tools (`packages/supervisor/secondary/tools/`)
-- `hello_world.ts` - Demo greeting tool
-- `json_validator.ts` - JSON Schema validation
-- `dynamic_tool_create.ts` - Meta-tool for runtime tool creation
+| File | Purpose |
+|------|---------|
+| `types.ts` | Type definitions |
+| `ipc.ts` | HTTP client, event emitter |
 
-## Features Working
+## Features
 
-- **MCP Protocol**: Connects to Claude CLI, Cursor, Windsurf, etc.
-- **Auto-Restart**: Up to 5 restart attempts before rollback
-- **Snapshot/Rollback**: Directory-based snapshots with 10-retention policy
+- **MCP Protocol**: Connects to Claude Code, Cursor, Windsurf
+- **Auto-Restart**: Up to 5 attempts before rollback
+- **Snapshot/Rollback**: Directory-based with 10-retention policy
 - **Hot-Reload**: File watcher triggers automatic tool reload
-- **Security Scanning**: Blocks dangerous patterns:
-  - `process.exit`, `eval()`, `new Function()`
-  - `require()`, `child_process`, `__proto__`
-  - Infinite loops (`while(true)`, `for(;;)`)
-- **Dynamic Tool Creation**: Create new tools at runtime via MCP call
-- **Health Monitoring**: 1-second intervals, 3 failures = crash trigger
+- **Tool Change Notifications**: Hash-based detection, notifies MCP clients
+- **Security Scanning**: Blocks `eval`, `child_process`, `__proto__`, etc.
+- **Dynamic Tool Creation**: Create/delete tools at runtime via MCP
 
-## How To Use
-
-### Run Beta Test Suite
-```bash
-cd packages/supervisor
-bun run beta:test
-```
-
-### Run with MCP Client (Claude CLI, Cursor)
-Add to your MCP config:
-```json
-{
-  "mcpServers": {
-    "barrhawk-beta": {
-      "command": "bun",
-      "args": ["run", "beta"],
-      "cwd": "/absolute/path/to/packages/supervisor"
-    }
-  }
-}
-```
-
-### Run Secondary Standalone (for dev)
-```bash
-bun run beta:secondary
-# Then hit http://localhost:3001/health
-```
-
-## Known Limitations (Beta)
-
-1. **No rate limiting** - Full version has Bridge handling this
-2. **No circuit breaker** - Crashes just restart, no backoff intelligence
-3. **No metrics** - No observability beyond health checks
-4. **No Igor/Frank split** - All tools treated the same (no stable vs experimental)
-5. **MCP stdio only** - No HTTP transport for Primary (would need wrapper)
-
-## Commands Reference
+## Usage
 
 ```bash
-# Full three-tier (not ready yet)
-bun run start          # Launch Doctor/Igor/Frankenstein
+# Run as MCP server
+bun run packages/supervisor/primary/index.ts
 
-# Beta two-tier (ready now)
-bun run beta           # Launch Primary (MCP server)
-bun run beta:secondary # Launch Secondary standalone
-bun run beta:test      # Run test suite
+# Test Secondary standalone
+curl http://localhost:3001/health
+curl http://localhost:3001/tools
 ```
 
----
+## Known Limitations
 
-*This beta gives users self-healing, hot-reload, and dynamic tools while we finish the full Frankenstack architecture.*
+1. No rate limiting (future Bridge layer)
+2. No circuit breaker intelligence
+3. No metrics/observability beyond health checks
+4. Single Secondary (no Igor/Frankenstein split yet)
+5. MCP stdio only (no HTTP transport)
+
+## Migration Path
+
+This beta validates the supervisor pattern. Next steps:
+
+1. **Bridge Integration** - Rust/Go microkernel for crash immunity
+2. **Igor/Frankenstein Split** - Stable vs experimental tool runtimes
+3. **Observability** - Structured logging, metrics aggregation
+
+See [FRANKENSTACK_GUIDE.md](FRANKENSTACK_GUIDE.md) for the full roadmap.

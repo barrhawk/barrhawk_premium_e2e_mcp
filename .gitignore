@@ -2,18 +2,19 @@
 node_modules/
 .bun/
 bun.lockb
+bun.lock
 
 # Build
 dist/
 *.tsbuildinfo
 
-# Runtime artifacts
-packages/snapshots/
+# Runtime
+snapshots/
 
 # Environment
 .env
 .env.local
-.env.*.local
+.env.*local
 
 # IDE
 .idea/
@@ -30,4 +31,7 @@ logs/
 
 # Test artifacts
 test-artifacts/
-bun.lock
+coverage/
+
+# Session files
+working.md
