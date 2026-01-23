@@ -1,0 +1,32 @@
+{
+  "name": "@barrhawk/supervisor",
+  "version": "1.0.0-beta",
+  "description": "Frankencode Three-Tier Architecture - Doctor/Igor/Frankenstein",
+  "type": "module",
+  "main": "launcher.ts",
+  "scripts": {
+    "start": "bun run launcher.ts start",
+    "stop": "bun run launcher.ts stop",
+    "status": "bun run launcher.ts status",
+    "doctor": "bun run doctor/index.ts",
+    "igor": "bun run igor/index.ts",
+    "frankenstein": "bun run frankenstein/index.ts",
+    "dev": "bun --hot run launcher.ts start",
+    "beta": "bun run primary/index.ts",
+    "beta:secondary": "bun --hot run secondary/index.ts",
+    "beta:test": "bun run scripts/test-beta.ts",
+    "mcp:test": "bun run scripts/test-mcp.ts"
+  },
+  "keywords": [
+    "mcp",
+    "testing",
+    "ai",
+    "e2e",
+    "three-tier",
+    "frankencode"
+  ],
+  "author": "BarrHawk",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

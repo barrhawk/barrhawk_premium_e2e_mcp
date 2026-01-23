@@ -1,0 +1,30 @@
+{
+  "name": "barrhawk-premium-e2e",
+  "version": "1.0.0-beta.1",
+  "description": "BarrHawk Premium E2E Testing - Self-healing MCP server with dynamic tools",
+  "type": "module",
+  "main": "packages/supervisor/index.ts",
+  "scripts": {
+    "beta": "bun run packages/supervisor/primary/index.ts",
+    "beta:secondary": "bun --hot run packages/supervisor/secondary/index.ts",
+    "beta:test": "bun run packages/supervisor/scripts/test-beta.ts",
+    "mcp:test": "bun run packages/supervisor/scripts/test-mcp.ts",
+    "test": "bun run beta:test && bun run mcp:test"
+  },
+  "keywords": [
+    "mcp",
+    "e2e",
+    "testing",
+    "ai",
+    "self-healing",
+    "automation"
+  ],
+  "author": "BarrHawk",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
