@@ -2,6 +2,46 @@
 
 All notable changes to BarrHawk E2E will be documented in this file.
 
+## [0.3.0] - 2026-01-26
+
+### Added
+
+- **Multi-Platform Support** - Run BarrHawk on any AI coding platform:
+  - Claude CLI (`~/.claude.json`)
+  - Gemini CLI (`~/.gemini/settings.json`)
+  - Codex CLI (`~/.codex/config.toml`)
+  - Windsurf (`~/.codeium/windsurf/mcp_config.json`)
+  - Cursor (`~/.cursor/mcp.json`)
+  - Antigravity (`~/.antigravity/mcp_config.json`)
+
+- **AI Backend Abstraction** - Pluggable AI providers for Lightning Strike:
+  - Claude (Anthropic)
+  - Gemini (Google)
+  - OpenAI (GPT)
+  - Ollama (local)
+  - Auto-detection from environment variables
+
+- **Core Packages**:
+  - `ai-tools` - AI-powered test analysis, accessibility audits, failure analysis, test generation
+  - `browser` - Browser state management for Playwright integration
+  - `events` - Event emitter, persistence, and transport layer
+  - `free-tools` - Assertions, data generation, reporting, security scanning
+  - `observability` - Metrics dashboard, CLI viewer, test integration
+  - `self-heal` - Self-healing selector strategies (ID, CSS path, ARIA, text, data-testid)
+  - `testing` - Test utilities and model context verification
+  - `types` - Shared TypeScript type definitions
+
+- **Config Generator** - `scripts/generate-mcp-configs.sh` generates configs for all 6 platforms
+
+- **Platform Documentation** - Detailed setup guides for each platform in `docs/platforms/`
+
+### Changed
+
+- README updated with multi-platform table and package documentation
+- AI backend selection via `AI_BACKEND` environment variable
+
+---
+
 ## [0.2.0] - 2026-01-26
 
 ### Added
