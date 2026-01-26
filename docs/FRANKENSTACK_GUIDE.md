@@ -1,95 +1,227 @@
-# The Frankenstack Guide: Taming the Multi-Language Beast
+# The Frankenstack Guide: Multi-Component Architecture
 
-## The Challenge
+## Overview
 
-We are building **Barrhawk**, an autonomous QA platform. To achieve the reliability and performance we need, we are not sticking to a single language. We are building a **Frankenstack**:
+The Frankenstack is BarrHawk's four-component architecture for intelligent E2E testing. It provides fault tolerance, automatic tool generation, and adaptive AI escalation.
 
-*   **TypeScript (Bun/Node):** For the "Brain" (Doctor), Dynamic Tools (Frankenstein), and Dashboard (Next.js). It's flexible and ecosystem-rich.
-*   **Rust/Go/Dart:** For the "Bridge" – the immutable microkernel that ensures the system *never* dies, even if the JS runtime segfaults.
-
-**The Problem:** Managing build pipelines, IPC (Inter-Process Communication), and developer experience across four languages is usually a nightmare.
-
-## The Architecture: Why Do This?
+## Architecture
 
 ```
-┌─────────────┐
-│   BRIDGE    │  <-- The "Indestructible" Kernel (Rust/Go/Dart)
-│             │      - Rate Limiter
-│             │      - Circuit Breaker
-│             │      - Metric Collector
-└──────┬──────┘
-       │ Stdio / HTTP / WebSocket
-       ▼
-┌─────────────┐
-│   DOCTOR    │  <-- The "Brain" (TypeScript - Primary Supervisor)
-│             │      - MCP Interface
-│             │      - Router
-└──────┬──────┘
-       │
-       ▼
-┌──────┴──────┐
-│             │
-▼             ▼
-┌─────────┐  ┌──────────────┐
-│  IGOR   │  │ FRANKENSTEIN │  <-- The "Hands" (TypeScript - Secondary Supervisors)
-│         │  │              │
-│ Stable  │  │ Experimental │
-│ Cached  │  │ Hot-reload   │
-└─────────┘  └──────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                          BRIDGE                                  │
+│                    (TypeScript - Bun)                            │
+│                                                                  │
+│   Rate Limiter ─── Circuit Breakers ─── Connection Manager       │
+│                        │                                         │
+│   Dead Letter Queue ─── Metrics ─── Seen Cache                   │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ WebSocket / HTTP
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────────┐
+│    DOCTOR     │  │     IGOR      │  │   FRANKENSTEIN    │
+│ (TypeScript)  │  │ (TypeScript)  │  │   (TypeScript)    │
+│               │  │               │  │                   │
+│ • Planner     │  │ • Executor    │  │ • Playwright      │
+│ • Failure     │  │ • Lightning   │  │ • Dynamic Tools   │
+│   Tracking    │  │   Strike      │  │ • Hot Reload      │
+│ • Swarm       │  │ • Toolkit     │  │ • System Tools    │
+│   Coord       │  │               │  │                   │
+└───────────────┘  └───────────────┘  └───────────────────┘
 ```
 
-We accept the complexity of the stack to gain:
-1.  **Fault Tolerance:** If `Frankenstein` (running user code) crashes, `Doctor` restarts it. If `Doctor` crashes, `Bridge` restarts it.
-2.  **Performance:** `Bridge` handles high-volume metric ingestion without GC pauses.
-3.  **Safety:** Experimental tools run in a completely isolated process (`Frankenstein`).
+## Why This Architecture?
 
-## Migration Path to Full Frankenstack
+1. **Fault Tolerance**: If Frankenstein crashes (running experimental code), Doctor restarts it. If Doctor crashes, Bridge restarts it. The system self-heals.
 
-We are currently at **Step 1 (Beta)**. Here is the road ahead.
+2. **Performance**: Bridge handles high-volume message routing without blocking the AI components.
 
-### 1. The Beta (Current State)
-We use a **Two-Tier** TypeScript system.
-*   **Primary:** Acts as a proto-Doctor. Handles MCP.
-*   **Secondary:** Acts as a combined Igor/Frankenstein. Handles tools.
-*   **Bridge:** None. We rely on Bun's supervisor capabilities.
+3. **Safety**: Experimental tools run in isolated Frankenstein process. Stable tools run in Igor.
 
-**Action:** Ship this. It proves the "Supervisor" pattern works.
+4. **Learning**: Failure patterns in Igor automatically trigger tool creation in Frankenstein.
 
-### 2. The Bridge Integration (Next Step)
-We need to introduce the **Bridge** without breaking the Beta.
-*   **Decision:** We must pick **ONE** language for the official Bridge implementation initially. Based on the `langtest/` folder, **Rust** or **Go** are the top contenders for performance.
-*   **Implementation:**
-    1.  Compile the Bridge binary.
-    2.  Modify the MCP config to launch the *Bridge* instead of the Primary JS process.
-    3.  The Bridge spawns the Primary JS process.
-    4.  The Bridge proxies Stdio from the client to the Primary, while intercepting specific control signals.
+## Component Responsibilities
 
-### 3. The Split (Igor vs. Frankenstein)
-Once the Bridge is stable, we split the Secondary.
-*   **Igor:** A static, optimized runtime for core tools (Filesystem, Browser control).
-*   **Frankenstein:** A dynamic, `bun --hot` runtime for user-generated tools and AI experiments.
-*   **Doctor:** Needs a router update to send traffic to the correct subprocess.
+### Bridge (Port 7000)
+The indestructible kernel. Handles all inter-component communication.
 
-## Managing the Chaos (Practical Tips)
+| Feature | Implementation |
+|---------|---------------|
+| Rate Limiting | Token bucket (100/sec, 200 burst) |
+| Circuit Breakers | Per-component with failure thresholds |
+| Connection Manager | Health scoring, reconnection logic |
+| Dead Letter Queue | Failed messages for debugging |
+| Seen Cache | Deduplication of messages |
 
-### 1. Unified Build System
-Do not run `cargo build`, `go build`, and `bun build` manually.
-*   Use `nut.sh` or a `Makefile` as the single entry point.
-*   Example: `bun run build:all` should trigger the Rust/Go builds.
+### Doctor (Port 7001)
+The orchestrator. Plans and coordinates all testing activity.
 
-### 2. Artifact Hygiene
-*   **NEVER** commit build artifacts (`target/`, `bin/`, `*.o`, `*.rlib`).
-*   **CI Checks:** Add a pre-commit hook or CI step that fails if binary files are detected in the diff.
+| Feature | Implementation |
+|---------|---------------|
+| Plan Generation | Converts intent to executable steps |
+| Failure Tracking | Patterns by action/error/selector |
+| Tool Requests | Auto-requests tools after threshold |
+| Swarm Coordination | Manages parallel Igor instances |
+| Experience System | Learns from past failures |
 
-### 3. Contract Testing
-*   The protocol between Bridge and Doctor must be versioned.
-*   Use `langtest/protocol/bridge-message.schema.json` as the source of truth.
-*   Run integration tests that specifically check if the Bridge correctly restarts a crashing Doctor.
+### Igor (Port 7002)
+The executor. Runs the actual test steps.
 
-### 4. Logging & Observability
-*   When you have 3+ processes, `console.log` is useless.
-*   Use structured logging (JSON).
-*   The Bridge should aggregate logs from Doctor, Igor, and Frankenstein and emit them in a unified stream (or to the `observability` package).
+| Feature | Implementation |
+|---------|---------------|
+| Plan Execution | Step-by-step with result reporting |
+| Lightning Strike | Dumb → Claude escalation |
+| Stable Toolkit | Pre-verified tools |
+| Frank Manager | Spawns Frankenstein workers |
 
-## Future Proofing
-The Frankenstack allows us to swap components. If Bun becomes unstable, we can swap `Igor` to Deno or Node.js without changing the `Bridge` or the `Doctor` logic. This architecture is our insurance policy against ecosystem churn.
+### Frankenstein (Port 7003)
+The laboratory. Creates and runs experimental tools.
+
+| Feature | Implementation |
+|---------|---------------|
+| Browser Control | Playwright integration |
+| Dynamic Tools | Runtime compilation |
+| Hot Reload | File watching with auto-reload |
+| System Tools | Screenshot, mouse, keyboard |
+| Tool Export | "Igorification" for stable tools |
+
+## Message Flow
+
+### Standard Test Execution
+```
+1. User → Doctor: "Test login flow"
+2. Doctor → Igor: plan.submit {steps: [...]}
+3. Igor → Doctor: plan.accepted
+4. Igor → Doctor: step.completed (for each step)
+5. Igor → Doctor: plan.completed
+```
+
+### Failure→Create Flow
+```
+1. Igor → Doctor: step.failed {error: "element not found", selector: "#btn"}
+2. Doctor tracks pattern, increments counter
+3. [After threshold reached]
+4. Doctor → Frankenstein: tool.create {type: "smart_selector", ...}
+5. Frankenstein compiles tool
+6. Frankenstein → Doctor: tool.created {name: "auto_smart_selector_xyz"}
+```
+
+### Lightning Strike Escalation
+```
+1. Igor in dumb mode: pattern matching only
+2. Igor fails 3 consecutive times
+3. Igor → Lightning Strike: escalate to Claude mode
+4. Igor uses Claude API for reasoning
+5. Igor succeeds, remains in Claude mode
+6. After success streak, returns to dumb mode
+```
+
+## Shared Infrastructure
+
+Located in `tripartite/shared/`:
+
+| File | Purpose |
+|------|---------|
+| `circuit-breaker.ts` | Failure isolation per component |
+| `rate-limiter.ts` | Token bucket rate limiting |
+| `connection-manager.ts` | Health scoring, reconnection |
+| `dead-letter.ts` | Failed message storage |
+| `experience.ts` | Learning from past runs |
+| `tool-registry.ts` | Dynamic tool management |
+| `validation.ts` | Message and tool validation |
+| `logger.ts` | Structured logging |
+| `metrics.ts` | Performance metrics |
+
+## Running the Stack
+
+### Full Stack
+```bash
+cd tripartite
+./start.sh
+```
+
+### Individual Components
+```bash
+# Bridge (start first)
+bun run tripartite/bridge/index.ts
+
+# Doctor (after Bridge)
+bun run tripartite/doctor/index.ts
+
+# Igor (after Bridge)
+bun run tripartite/igor/index.ts
+
+# Frankenstein (after Bridge)
+bun run tripartite/frankenstein/index.ts
+```
+
+### MCP Integration
+```bash
+# For Claude CLI integration
+bun run tripartite/mcp-frank.ts
+```
+
+## Configuration
+
+### Environment Variables
+```bash
+# Ports
+BRIDGE_PORT=7000
+DOCTOR_PORT=7001
+IGOR_PORT=7002
+FRANK_PORT=7003
+
+# Feature Flags
+FRANK_TOOL_CREATION_ENABLED=true
+FAILURE_THRESHOLD_FOR_TOOL=2
+LIGHTNING_AUTO_THRESHOLD=3
+
+# API Keys (for Lightning Strike Claude mode)
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+## Development Workflow
+
+1. **Add new tool pattern**: Edit Doctor's `analyzeFailurePattern()` to recognize new error types
+
+2. **Add stable tool**: Create in `igor/stable-toolkit.ts`, register in toolkit
+
+3. **Add dynamic tool**: Use `frank_tools_create` MCP call or add to `frankenstein/dynamic-tools.ts`
+
+4. **Test failure flow**: Use `tests/failure-create-flow.test.ts`
+
+## Monitoring
+
+### Health Endpoints
+```bash
+curl http://localhost:7000/health  # Bridge
+curl http://localhost:7001/health  # Doctor
+curl http://localhost:7002/health  # Igor
+curl http://localhost:7003/health  # Frankenstein
+```
+
+### Status Endpoints
+```bash
+curl http://localhost:7001/frank   # Doctor's Frank integration status
+curl http://localhost:7002/lightning  # Igor's Lightning Strike status
+curl http://localhost:7003/tools   # Frankenstein's tool list
+```
+
+## Troubleshooting
+
+### Component won't connect to Bridge
+- Check Bridge is running first
+- Verify port is not in use: `lsof -i :7000`
+- Check circuit breaker state: `curl http://localhost:7000/health`
+
+### Tools not being created
+- Verify `FRANK_TOOL_CREATION_ENABLED=true`
+- Check threshold: default is 2 failures
+- Check Doctor's failure tracking: `curl http://localhost:7001/frank`
+
+### Lightning Strike not escalating
+- Verify `ANTHROPIC_API_KEY` is set
+- Check threshold: default is 3 failures
+- Check Igor status: `curl http://localhost:7002/lightning`

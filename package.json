@@ -1,7 +1,7 @@
 {
   "name": "barrhawk-premium-e2e",
-  "version": "1.0.0-beta.1",
-  "description": "BarrHawk Premium E2E Testing - Self-healing MCP server with dynamic tools",
+  "version": "1.0.0-beta.2",
+  "description": "BarrHawk Premium E2E Testing - Self-healing MCP server with tripartite architecture",
   "type": "module",
   "main": "packages/supervisor/index.ts",
   "scripts": {
@@ -9,7 +9,13 @@
     "beta:secondary": "bun --hot run packages/supervisor/secondary/index.ts",
     "beta:test": "bun run packages/supervisor/scripts/test-beta.ts",
     "mcp:test": "bun run packages/supervisor/scripts/test-mcp.ts",
-    "test": "bun run beta:test && bun run mcp:test"
+    "test": "bun run beta:test && bun run mcp:test",
+    "tripartite": "cd tripartite && ./start.sh",
+    "tripartite:bridge": "bun run tripartite/bridge/index.ts",
+    "tripartite:doctor": "bun run tripartite/doctor/index.ts",
+    "tripartite:igor": "bun run tripartite/igor/index.ts",
+    "tripartite:frank": "bun run tripartite/frankenstein/index.ts",
+    "mcp:frank": "bun run tripartite/mcp-frank.ts"
   },
   "keywords": [
     "mcp",
@@ -17,7 +23,9 @@
     "testing",
     "ai",
     "self-healing",
-    "automation"
+    "automation",
+    "tripartite",
+    "swarm"
   ],
   "author": "BarrHawk",
   "license": "MIT",
