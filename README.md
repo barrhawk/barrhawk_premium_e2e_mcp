@@ -219,6 +219,39 @@ bun run beta:test            # Run test suite
 | **Multi-agent** | Antigravity (Manager Surface) |
 | **Offline** | Any platform + Ollama backend |
 
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| `packages/ai-tools` | AI-powered test analysis, accessibility audits, failure analysis, test generation |
+| `packages/browser` | Browser state management for Playwright integration |
+| `packages/dashboard-min` | Real-time TSX dashboard for tripartite monitoring |
+| `packages/events` | Event emitter, persistence, and transport layer |
+| `packages/free-tools` | Free tier tools: assertions, data generation, reporting, security scanning |
+| `packages/observability` | Metrics dashboard, CLI viewer, and test integration |
+| `packages/self-heal` | Self-healing selector strategies (ID, CSS path, ARIA, text, data-testid) |
+| `packages/supervisor` | Legacy two-tier supervisor with primary/secondary architecture |
+| `packages/testing` | Test utilities and model context verification |
+| `packages/types` | Shared TypeScript type definitions |
+
+### Package Usage
+
+```typescript
+// AI-powered test analysis
+import { analyzeFailure, suggestFix, generateTests } from './packages/ai-tools/src';
+
+// Self-healing selectors
+import { Healer } from './packages/self-heal';
+const healer = new Healer();
+const element = await healer.find(page, originalSelector);
+
+// Free tools for assertions
+import { assertEquals, assertContains } from './packages/free-tools/src/assertions';
+
+// Event system
+import { EventEmitter } from './packages/events';
+```
+
 ## License
 
 [Elastic License 2.0](LICENSE)
