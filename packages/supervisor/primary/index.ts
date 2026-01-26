@@ -110,7 +110,7 @@ class Supervisor {
     console.error('[Primary] Starting secondary server...');
 
     this.process = spawn({
-      cmd: [process.execPath, '--hot', 'index.ts'],
+      cmd: ['bun', '--hot', 'index.ts'],
       cwd: this.config.secondaryPath,
       env: {
         ...process.env,
@@ -312,7 +312,11 @@ class Supervisor {
 async function main() {
   const supervisor = new Supervisor();
 
-  // Create MCP server FIRST - Claude Code connects immediately
+  // Initialize and start
+  await supervisor.init();
+  await supervisor.start();
+
+  // Create MCP server
   const server = new Server(
     {
       name: 'barrhawk-supervisor',
@@ -325,23 +329,9 @@ async function main() {
     }
   );
 
-  // Track if secondary is ready
-  let secondaryReady = false;
-  let secondaryError: Error | null = null;
-  let lastToolHash = '';
-
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    // Wait for secondary to be ready (with timeout)
-    if (!secondaryReady && !secondaryError) {
-      const maxWait = 15000;
-      const start = Date.now();
-      while (!secondaryReady && !secondaryError && Date.now() - start < maxWait) {
-        await new Promise(r => setTimeout(r, 100));
-      }
-    }
-
-    // Get secondary tools (empty if not ready)
+    // Get secondary tools
     const secondaryTools = await supervisor.getTools();
 
     // Primary-only tools (immutable)
@@ -409,20 +399,6 @@ async function main() {
             },
           },
           required: ['path'],
-        },
-      },
-      {
-        name: 'dynamic_tool_delete',
-        description: 'Delete a dynamic tool by name',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              description: 'Name of the tool to delete',
-            },
-          },
-          required: ['name'],
         },
       },
     ];
@@ -521,69 +497,16 @@ async function main() {
         }
       }
 
-      case 'dynamic_tool_delete': {
-        const toolName = (args as { name: string }).name;
-
-        // Protected tools that cannot be deleted
-        const protected_tools = ['dynamic_tool_create', 'hello_world'];
-        if (protected_tools.includes(toolName)) {
-          return {
-            content: [{ type: 'text', text: `Error: Cannot delete protected tool '${toolName}'` }],
-            isError: true,
-          };
-        }
-
-        try {
-          const response = await fetch(`http://localhost:${supervisor['secondaryPort']}/tools/${toolName}`, {
-            method: 'DELETE',
-          });
-          const result = await response.json();
-
-          if (!result.success) {
-            return {
-              content: [{ type: 'text', text: `Error: ${result.error}` }],
-              isError: true,
-            };
-          }
-
-          return {
-            content: [{ type: 'text', text: `Tool '${toolName}' deleted successfully` }],
-          };
-        } catch (err) {
-          return {
-            content: [{ type: 'text', text: `Error deleting tool: ${(err as Error).message}` }],
-            isError: true,
-          };
-        }
-      }
-
       default: {
         // Delegate to secondary
         try {
           const result = await supervisor.callTool(name, args);
-
-          // Check if secondary returned an error with stack trace
-          if (result.isError && result.content?.[0]?.text) {
-            const errorText = result.content[0].text;
-            // Format error for better readability
-            return {
-              content: [{
-                type: 'text',
-                text: errorText,
-              }],
-              isError: true,
-            };
-          }
-
           return result;
         } catch (err) {
-          const error = err as Error;
-          // Include stack trace for better debugging
-          const errorMsg = error.stack || error.message;
           return {
             content: [{
               type: 'text',
-              text: `Error calling tool ${name}:\n${errorMsg}`,
+              text: `Error calling tool ${name}: ${(err as Error).message}`,
             }],
             isError: true,
           };
@@ -592,59 +515,11 @@ async function main() {
     }
   });
 
-  // Connect to stdio transport IMMEDIATELY - don't block on secondary
+  // Connect to stdio transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('[Primary] MCP server connected, starting secondary in background...');
-
-  // Start secondary in background (non-blocking)
-  (async () => {
-    try {
-      await supervisor.init();
-      await supervisor.start();
-      secondaryReady = true;
-      console.error('[Primary] Secondary ready, tools available');
-
-      // Hash tool definitions to detect any changes (not just count)
-      const hashTools = (tools: ToolDefinition[]) => {
-        const data = tools.map(t => `${t.name}:${t.description}:${JSON.stringify(t.inputSchema)}`).sort().join('|');
-        let hash = 0;
-        for (let i = 0; i < data.length; i++) {
-          hash = ((hash << 5) - hash) + data.charCodeAt(i);
-          hash |= 0;
-        }
-        return hash.toString(16);
-      };
-
-      // Get initial tool hash
-      const initialTools = await supervisor.getTools();
-      lastToolHash = hashTools(initialTools);
-
-      // Poll for tool changes and notify client
-      setInterval(async () => {
-        try {
-          const tools = await supervisor.getTools();
-          const currentHash = hashTools(tools);
-          if (currentHash !== lastToolHash) {
-            console.error(`[Primary] Tools changed (hash ${lastToolHash} -> ${currentHash}), notifying client`);
-            lastToolHash = currentHash;
-
-            // Send MCP notification to trigger client tool list refresh
-            await server.notification({
-              method: 'notifications/tools/list_changed',
-            });
-          }
-        } catch {
-          // Secondary might be restarting, ignore
-        }
-      }, 1000);
-
-    } catch (err) {
-      secondaryError = err as Error;
-      console.error('[Primary] Secondary failed to start:', err);
-    }
-  })();
+  console.error('[Primary] MCP server ready');
 
   // Handle shutdown
   process.on('SIGINT', async () => {

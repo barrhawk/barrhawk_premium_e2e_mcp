@@ -1,0 +1,18 @@
+{
+  "name": "@barrhawk/free-tools",
+  "version": "1.0.0",
+  "description": "Free tier testing tools for BarrHawk E2E",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}

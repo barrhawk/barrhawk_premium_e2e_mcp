@@ -1,0 +1,25 @@
+{
+  "name": "@barrhawk/observability",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "bin": {
+    "barrhawk-logs": "./cli.ts",
+    "barrhawk-viewer": "./viewer.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "viewer": "tsx viewer.ts",
+    "cli": "tsx cli.ts",
+    "test": "tsx test-integration.ts"
+  },
+  "dependencies": {
+    "@barrhawk/events": "file:../events"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "tsx": "^4.21.0"
+  }
+}

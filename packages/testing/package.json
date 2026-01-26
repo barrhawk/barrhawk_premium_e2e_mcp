@@ -1,0 +1,26 @@
+{
+  "name": "@barrhawk/testing",
+  "version": "1.0.0",
+  "description": "Testing utilities for BarrHawk E2E MCP",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx src/*.test.ts"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./model-context-verify": {
+      "import": "./dist/model-context-verify.js",
+      "types": "./dist/model-context-verify.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}

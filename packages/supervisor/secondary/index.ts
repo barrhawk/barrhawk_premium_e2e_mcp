@@ -145,18 +145,9 @@ const server = serve({
             }],
           });
         } catch (err) {
-          const error = err as Error;
-          lastError = error.message;
-
-          // Include full stack trace for debugging
-          const errorDetails = [
-            `Tool: ${toolName}`,
-            `Error: ${error.message}`,
-            error.stack ? `\nStack trace:\n${error.stack}` : '',
-          ].filter(Boolean).join('\n');
-
+          lastError = (err as Error).message;
           return Response.json({
-            content: [{ type: 'text', text: errorDetails }],
+            content: [{ type: 'text', text: `Error: ${(err as Error).message}` }],
             isError: true,
           });
         }

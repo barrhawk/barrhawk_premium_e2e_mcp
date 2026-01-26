@@ -1,0 +1,9 @@
+{
+  "name": "@barrhawk/ai-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered testing tools for BarrHawk",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}
