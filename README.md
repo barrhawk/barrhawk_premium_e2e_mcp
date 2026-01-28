@@ -1,6 +1,6 @@
 # BarrHawk Premium E2E
 
-> **NOTICE** | Updated: 2026-01-26
+> **NOTICE** | Updated: 2026-01-28
 >
 > **Claude Code CLI Stability Issues**: We are experiencing intermittent hanging and freezing issues with Claude Code CLI during extended testing sessions. These are [known upstream issues](https://github.com/anthropics/claude-code/issues/13240) affecting long-running automated workflows.
 >
@@ -89,6 +89,53 @@ curl http://localhost:7002/health  # Igor
 curl http://localhost:7003/health  # Frankenstein
 ```
 
+### 6. Launch Dashboard (Optional)
+
+```bash
+bun run dashboard
+# Opens War Room at http://localhost:3333
+```
+
+## War Room Dashboard
+
+Real-time observability dashboard for the tripartite stack.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  BarrHawk War Room                    Bridge ● Doctor ● Igor ● Frank ●  │
+├─────────────────────────────────────────┬───────────────────────────────┤
+│                                         │  Command                      │
+│           Browser Screenshot            │  [Test the login flow...] Run │
+│           (Live from Frank)             ├───────────────────────────────┤
+│                                         │  Active Plans          [0]    │
+│                                         │  No active plans              │
+├─────────────────────────────────────────┼───────────────────────────────┤
+│  Doctor → Igor → Igor-1 → Igor-2 → Frank│  Test Results         [32]    │
+│  Plans:0   idle   idle     idle  0 tools│  ┌─────────────────────────┐  │
+├─────────────────────────────────────────┤  │ PASS  Navigate to goo.. │  │
+│ Executed │ Passed │ Failed │ Agents │ % │  │ PASS  Test login flow   │  │
+│    32    │   32   │   0    │   1    │100│  │ PASS  Click submit btn  │  │
+└─────────────────────────────────────────┴──┴─────────────────────────┴──┘
+```
+
+**Features:**
+- **Live Browser View** - Screenshots from Frankenstein in real-time
+- **Test Results** - Pass/fail badges from Bridge `/reports` with timestamps
+- **Metrics Bar** - Executed, passed, failed counts and success rate
+- **Agent Pipeline** - Visual flow of Doctor → Igor(s) → Frank
+- **Live Events** - WebSocket stream of all tripartite messages
+
+**API Endpoints:**
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Dashboard UI |
+| `GET /health` | Component status |
+| `GET /api/state` | Full dashboard state |
+| `GET /api/reports` | Test results and stats |
+| `GET /api/screenshot` | Latest browser screenshot |
+| `POST /api/plan` | Submit test intent |
+| `WS /ws` | Real-time state updates |
+
 ## AI Backend Abstraction
 
 BarrHawk's Lightning Strike feature uses a pluggable AI backend system:
@@ -175,6 +222,7 @@ bun run tripartite:doctor    # Start Doctor only
 bun run tripartite:igor      # Start Igor only
 bun run tripartite:frank     # Start Frankenstein only
 bun run mcp:frank            # Start MCP-Frank server
+bun run dashboard            # Start War Room dashboard (port 3333)
 
 # Beta (legacy two-tier)
 bun run beta                 # Start Primary
@@ -195,6 +243,7 @@ bun run beta:test            # Run test suite
 | `DOCTOR_PORT` | 7001 | Doctor HTTP port |
 | `IGOR_PORT` | 7002 | Igor HTTP port |
 | `FRANK_PORT` | 7003 | Frankenstein HTTP port |
+| `DASHBOARD_PORT` | 3333 | War Room dashboard port |
 
 ## Status
 
@@ -225,7 +274,7 @@ bun run beta:test            # Run test suite
 |---------|-------------|
 | `packages/ai-tools` | AI-powered test analysis, accessibility audits, failure analysis, test generation |
 | `packages/browser` | Browser state management for Playwright integration |
-| `packages/dashboard-min` | Real-time TSX dashboard for tripartite monitoring |
+| `packages/dashboard-min` | War Room dashboard with test reports, live browser view, metrics |
 | `packages/events` | Event emitter, persistence, and transport layer |
 | `packages/free-tools` | Free tier tools: assertions, data generation, reporting, security scanning |
 | `packages/observability` | Metrics dashboard, CLI viewer, and test integration |
