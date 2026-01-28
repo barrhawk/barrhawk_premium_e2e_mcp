@@ -28,7 +28,7 @@ import {
   SwarmPlan,
 } from './doctor/swarm.js';
 
-const VERSION = '2026-01-28-v3-better-errors';
+const VERSION = '2026-01-28-v4-video-recording';
 const BRIDGE_URL = process.env.BRIDGE_URL || 'ws://localhost:7000';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3333';
 
@@ -349,7 +349,7 @@ const TOOLS: Tool[] = [
   // Direct browser control (passthrough to Frankenstein)
   {
     name: 'frank_browser_launch',
-    description: 'Launch a browser instance. Supports loading Chrome extensions for testing sidebars, popups, and extension UIs.',
+    description: 'Launch a browser instance. Supports video recording for demos and loading Chrome extensions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -365,7 +365,20 @@ const TOOLS: Tool[] = [
         extensions: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Array of absolute paths to unpacked Chrome extensions to load. Extensions will be available via chrome.sidePanel, chrome.action, etc.',
+          description: 'Array of absolute paths to unpacked Chrome extensions to load.',
+        },
+        recordVideo: {
+          type: 'boolean',
+          description: 'Enable video recording of the browser session. Video is saved when browser closes.',
+          default: false,
+        },
+        videoSize: {
+          type: 'object',
+          properties: {
+            width: { type: 'number', default: 1280 },
+            height: { type: 'number', default: 720 },
+          },
+          description: 'Video resolution (default: 1280x720)',
         },
       },
     },
@@ -426,7 +439,15 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'frank_browser_close',
-    description: 'Close the browser instance',
+    description: 'Close the browser instance. If recording, returns the video file path.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'frank_video_status',
+    description: 'Check video recording status. Returns whether recording is active, duration, and path.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -799,7 +820,9 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       return bridge.request('frankenstein', 'browser.launch', {
         headless: args.headless || false,
         url: args.url,
-        extensions: args.extensions,  // Pass extension paths through
+        extensions: args.extensions,
+        recordVideo: args.recordVideo || false,
+        videoSize: args.videoSize,
       });
 
     case 'frank_browser_navigate':
@@ -820,6 +843,9 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 
     case 'frank_browser_close':
       return bridge.request('frankenstein', 'browser.close', {});
+
+    case 'frank_video_status':
+      return bridge.request('frankenstein', 'video.status', {});
 
     case 'frank_lightning_status':
       const igorStatus = await fetch('http://localhost:7002/health').then(r => r.json());

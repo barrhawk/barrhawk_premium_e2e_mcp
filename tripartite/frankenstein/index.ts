@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
 // =============================================================================
-const FRANKENSTEIN_VERSION = '2026-01-21-v8-system';
+const FRANKENSTEIN_VERSION = '2026-01-28-v9-video-recording';
 
 // =============================================================================
 // Configuration
@@ -56,12 +56,21 @@ const BROWSER_IDLE_TIMEOUT = parseInt(process.env.BROWSER_IDLE_TIMEOUT || '30000
 
 // Screenshot Storage
 const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || '/tmp/tripartite-screenshots';
+const VIDEOS_DIR = process.env.VIDEOS_DIR || '/tmp/tripartite-videos';
 const BRIDGE_URL_HTTP = process.env.BRIDGE_URL?.replace('ws://', 'http://').replace(':7000', ':7000') || 'http://localhost:7000';
 
-// Ensure screenshots directory exists
+// Ensure directories exist
 if (!existsSync(SCREENSHOTS_DIR)) {
   mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 }
+if (!existsSync(VIDEOS_DIR)) {
+  mkdirSync(VIDEOS_DIR, { recursive: true });
+}
+
+// Video recording state
+let isRecording = false;
+let recordingStartTime = 0;
+let currentVideoPath: string | null = null;
 
 // System tools availability
 let systemTools: Awaited<ReturnType<typeof detectTools>> | null = null;
@@ -154,6 +163,8 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           headless?: boolean;
           viewport?: { width: number; height: number };
           extensions?: string[];
+          recordVideo?: boolean;
+          videoSize?: { width: number; height: number };
         };
 
         // If extensions are specified, use persistent context for extension support
@@ -177,11 +188,38 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           browser = (context as any).browser?.() || null;
           page = context.pages()[0] || await context.newPage();
         } else {
-          browser = await chromium.launch({ headless: opts.headless ?? true });
-          context = await browser.newContext({
+          browser = await chromium.launch({ headless: opts.headless ?? false });
+
+          // Context options with optional video recording
+          const contextOpts: any = {
             viewport: opts.viewport || { width: 1280, height: 720 },
-          });
+          };
+
+          if (opts.recordVideo) {
+            const videoFilename = `recording-${Date.now()}`;
+            contextOpts.recordVideo = {
+              dir: VIDEOS_DIR,
+              size: opts.videoSize || { width: 1280, height: 720 },
+            };
+            isRecording = true;
+            recordingStartTime = Date.now();
+            currentVideoPath = null; // Will be set when we get the path
+            logger.info('Video recording enabled', { dir: VIDEOS_DIR });
+          }
+
+          context = await browser.newContext(contextOpts);
           page = await context.newPage();
+
+          // If recording, track the video path
+          if (opts.recordVideo && page) {
+            const video = page.video();
+            if (video) {
+              video.path().then(p => {
+                currentVideoPath = p;
+                logger.info('Video recording started', { path: p });
+              }).catch(() => {});
+            }
+          }
         }
         browserLaunchCount++;
 
@@ -383,6 +421,26 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
       }
 
       case 'browser.close': {
+        let videoPath: string | null = null;
+        let videoDuration = 0;
+
+        // If recording, save the video before closing
+        if (isRecording && page) {
+          const video = page.video();
+          if (video) {
+            try {
+              videoPath = await video.path();
+              videoDuration = Date.now() - recordingStartTime;
+              logger.info('Video saved', { path: videoPath, durationMs: videoDuration });
+            } catch (e) {
+              logger.warn('Could not get video path', { error: (e as Error).message });
+            }
+          }
+        }
+
+        if (context) {
+          await context.close(); // This finalizes the video
+        }
         if (browser) {
           await browser.close();
           browser = null;
@@ -390,8 +448,29 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           page = null;
           browserCloseCount++;
         }
-        bridge.sendTo(replyTo, 'browser.closed', { success: true, duration: getElapsed() }, id);
-        logger.info('Browser closed', { duration: getElapsed() });
+
+        // Reset recording state
+        const wasRecording = isRecording;
+        isRecording = false;
+        recordingStartTime = 0;
+        currentVideoPath = null;
+
+        bridge.sendTo(replyTo, 'browser.closed', {
+          success: true,
+          duration: getElapsed(),
+          video: wasRecording ? { path: videoPath, durationMs: videoDuration } : undefined,
+        }, id);
+        logger.info('Browser closed', { duration: getElapsed(), videoPath });
+        break;
+      }
+
+      case 'video.status': {
+        bridge.sendTo(replyTo, 'video.status', {
+          isRecording,
+          durationMs: isRecording ? Date.now() - recordingStartTime : 0,
+          path: currentVideoPath,
+          videosDir: VIDEOS_DIR,
+        }, id);
         break;
       }
 
@@ -438,6 +517,7 @@ bridge.on('browser.click', handleBrowserCommand);
 bridge.on('browser.type', handleBrowserCommand);
 bridge.on('browser.screenshot', handleBrowserCommand);
 bridge.on('browser.close', handleBrowserCommand);
+bridge.on('video.status', handleBrowserCommand);
 
 // =============================================================================
 // Message Handlers - Dynamic Tools
