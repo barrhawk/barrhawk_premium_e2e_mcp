@@ -28,7 +28,7 @@ import {
   SwarmPlan,
 } from './doctor/swarm.js';
 
-const VERSION = '2026-01-24-v2-dashboard-integration';
+const VERSION = '2026-01-28-v3-better-errors';
 const BRIDGE_URL = process.env.BRIDGE_URL || 'ws://localhost:7000';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3333';
 
@@ -227,7 +227,12 @@ class BridgeConnection {
       this.pendingRequests.delete(message.correlationId);
 
       if (message.type.endsWith('.error')) {
-        pending.reject(message.payload);
+        // Wrap error payload in Error with proper message for AI consumption
+        const payload = message.payload as Record<string, unknown>;
+        const errorMsg = payload?.error || payload?.message || payload?.reason || JSON.stringify(payload);
+        const err = new Error(String(errorMsg));
+        (err as any).details = payload;
+        pending.reject(err);
       } else {
         pending.resolve(message.payload);
       }
@@ -1104,9 +1109,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ],
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    // Extract meaningful error message for AI consumption
+    let message: string;
+    let details: unknown = undefined;
+
+    if (error instanceof Error) {
+      message = error.message;
+      details = (error as any).details;
+    } else if (typeof error === 'object' && error !== null) {
+      // Handle plain objects that got thrown
+      const obj = error as Record<string, unknown>;
+      message = String(obj.error || obj.message || obj.reason || JSON.stringify(obj));
+      details = obj;
+    } else {
+      message = String(error);
+    }
+
+    // Return structured error for AI to reason about
+    const errorResponse = details
+      ? { error: message, details, suggestion: 'Check the details field for more context. Consider using frank_tools_create to build a specialized tool for this case.' }
+      : { error: message };
+
     return {
-      content: [{ type: 'text', text: `Error: ${message}` }],
+      content: [{ type: 'text', text: `Error: ${JSON.stringify(errorResponse, null, 2)}` }],
       isError: true,
     };
   }
