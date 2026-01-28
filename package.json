@@ -1,6 +1,6 @@
 {
   "name": "barrhawk-premium-e2e",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "BarrHawk Premium E2E Testing - Self-healing MCP server with tripartite architecture",
   "type": "module",
   "main": "packages/supervisor/index.ts",
@@ -15,7 +15,8 @@
     "tripartite:doctor": "bun run tripartite/doctor/index.ts",
     "tripartite:igor": "bun run tripartite/igor/index.ts",
     "tripartite:frank": "bun run tripartite/frankenstein/index.ts",
-    "mcp:frank": "bun run tripartite/mcp-frank.ts"
+    "mcp:frank": "bun run tripartite/mcp-frank.ts",
+    "dashboard": "bun run packages/dashboard-min/server.ts"
   },
   "keywords": [
     "mcp",

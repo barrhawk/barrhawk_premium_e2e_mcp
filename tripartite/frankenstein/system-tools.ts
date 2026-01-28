@@ -508,31 +508,84 @@ export function getSystemToolDefinitions(): Array<{
   code: string;
   inputSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
 }> {
+  // These use exec() from the dynamic tool context instead of module imports
+  // so they work inside new Function() compiled tools
   return [
     {
       name: 'desktop_screenshot',
-      description: 'Take a screenshot of the entire desktop',
-      code: `const { takeScreenshot } = await import('./system-tools.js'); return await takeScreenshot();`,
-      inputSchema: { type: 'object', properties: {} },
+      description: 'Take an OS-level screenshot of the entire desktop (captures everything including sidebars, browser chrome, system dialogs)',
+      code: `
+        const filepath = params.output || '/tmp/frank_desktop_' + Date.now() + '.png';
+        // Kill stale spectacle processes
+        await exec('pkill -9 spectacle 2>/dev/null || true');
+        await sleep(300);
+        // Try screenshot tools in priority order
+        let result = await exec('spectacle -b -n -o "' + filepath + '" 2>/dev/null');
+        if (result.exitCode !== 0) {
+          result = await exec('grim "' + filepath + '" 2>/dev/null');
+        }
+        if (result.exitCode !== 0) {
+          result = await exec('scrot "' + filepath + '" 2>/dev/null');
+        }
+        if (result.exitCode !== 0) {
+          result = await exec('import -window root "' + filepath + '" 2>/dev/null');
+        }
+        // Read file size to verify
+        const statResult = await exec('stat -c %s "' + filepath + '" 2>/dev/null');
+        const size = parseInt(statResult.stdout.trim()) || 0;
+        if (size === 0) throw new Error('Screenshot failed - no tool produced output');
+        // Convert to base64 if requested
+        let base64 = null;
+        if (params.base64) {
+          const b64Result = await exec('base64 -w0 "' + filepath + '"');
+          base64 = b64Result.stdout;
+        }
+        return { path: filepath, size, base64, tool: 'os-level' };
+      `,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          output: { type: 'string', description: 'Output file path (default: /tmp/frank_desktop_<ts>.png)' },
+          base64: { type: 'boolean', description: 'Also return base64-encoded image data' },
+        },
+      },
     },
     {
       name: 'mouse_click',
-      description: 'Click the mouse at specified coordinates',
-      code: `const { mouseClick } = await import('./system-tools.js'); await mouseClick({ x: params.x, y: params.y, button: params.button || 'left' }); return { clicked: true };`,
+      description: 'Click the mouse at specified OS-level coordinates (works outside the DOM - browser chrome, sidebars, system UI)',
+      code: `
+        const x = params.x;
+        const y = params.y;
+        const btn = params.button === 'right' ? 3 : params.button === 'middle' ? 2 : 1;
+        if (x !== undefined && y !== undefined) {
+          await exec('xdotool mousemove ' + x + ' ' + y);
+          await sleep(50);
+        }
+        const clicks = params.clicks || 1;
+        for (let i = 0; i < clicks; i++) {
+          await exec('xdotool click ' + btn);
+          if (i < clicks - 1) await sleep(50);
+        }
+        return { clicked: true, x, y, button: params.button || 'left', clicks };
+      `,
       inputSchema: {
         type: 'object',
         properties: {
           x: { type: 'number', description: 'X coordinate' },
           y: { type: 'number', description: 'Y coordinate' },
-          button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button' },
+          button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button (default: left)' },
+          clicks: { type: 'number', description: 'Number of clicks (default: 1, use 2 for double-click)' },
         },
         required: ['x', 'y'],
       },
     },
     {
       name: 'mouse_move',
-      description: 'Move the mouse to specified coordinates',
-      code: `const { mouseMove } = await import('./system-tools.js'); await mouseMove({ x: params.x, y: params.y }); return { moved: true };`,
+      description: 'Move the mouse to specified OS-level coordinates',
+      code: `
+        await exec('xdotool mousemove ' + params.x + ' ' + params.y);
+        return { moved: true, x: params.x, y: params.y };
+      `,
       inputSchema: {
         type: 'object',
         properties: {
@@ -543,26 +596,59 @@ export function getSystemToolDefinitions(): Array<{
       },
     },
     {
+      name: 'mouse_drag',
+      description: 'Drag the mouse from one position to another (useful for resizing sidebars, panels)',
+      code: `
+        const btn = params.button === 'right' ? 3 : params.button === 'middle' ? 2 : 1;
+        await exec('xdotool mousemove ' + params.fromX + ' ' + params.fromY
+          + ' mousedown ' + btn
+          + ' mousemove ' + params.toX + ' ' + params.toY
+          + ' mouseup ' + btn);
+        return { dragged: true, from: { x: params.fromX, y: params.fromY }, to: { x: params.toX, y: params.toY } };
+      `,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          fromX: { type: 'number', description: 'Start X coordinate' },
+          fromY: { type: 'number', description: 'Start Y coordinate' },
+          toX: { type: 'number', description: 'End X coordinate' },
+          toY: { type: 'number', description: 'End Y coordinate' },
+          button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button (default: left)' },
+        },
+        required: ['fromX', 'fromY', 'toX', 'toY'],
+      },
+    },
+    {
       name: 'keyboard_type',
-      description: 'Type text using the keyboard',
-      code: `const { typeText } = await import('./system-tools.js'); await typeText(params.text, params.delay || 0); return { typed: true };`,
+      description: 'Type text using OS-level keyboard input (works in any focused window)',
+      code: `
+        const delay = params.delay || 0;
+        const cmd = 'xdotool type' + (delay > 0 ? ' --delay ' + delay : '') + ' -- "' + params.text.replace(/"/g, '\\\\"') + '"';
+        await exec(cmd);
+        return { typed: true, text: params.text };
+      `,
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'Text to type' },
-          delay: { type: 'number', description: 'Delay between keystrokes in ms' },
+          delay: { type: 'number', description: 'Delay between keystrokes in ms (default: 0)' },
         },
         required: ['text'],
       },
     },
     {
       name: 'keyboard_press',
-      description: 'Press a key or key combination',
-      code: `const { pressKey } = await import('./system-tools.js'); await pressKey(params.key, params.modifiers || []); return { pressed: true };`,
+      description: 'Press a key or key combination at OS level (e.g., ctrl+b for sidebar, F12 for devtools, Escape, Tab)',
+      code: `
+        const modifiers = params.modifiers || [];
+        const combo = [...modifiers, params.key].join('+');
+        await exec('xdotool key ' + combo);
+        return { pressed: true, combo };
+      `,
       inputSchema: {
         type: 'object',
         properties: {
-          key: { type: 'string', description: 'Key to press (e.g., Return, Tab, a)' },
+          key: { type: 'string', description: 'Key to press (e.g., Return, Tab, Escape, b, F12)' },
           modifiers: { type: 'array', items: { type: 'string' }, description: 'Modifier keys (ctrl, shift, alt, super)' },
         },
         required: ['key'],
@@ -570,19 +656,49 @@ export function getSystemToolDefinitions(): Array<{
     },
     {
       name: 'window_list',
-      description: 'List all windows',
-      code: `const { listWindows } = await import('./system-tools.js'); return await listWindows();`,
+      description: 'List all OS windows with their IDs, names, and positions',
+      code: `
+        const { stdout } = await exec('xdotool search --name "" 2>/dev/null || true');
+        const ids = stdout.trim().split('\\n').filter(Boolean).slice(0, 20);
+        const windows = [];
+        for (const id of ids) {
+          try {
+            const { stdout: name } = await exec('xdotool getwindowname ' + id + ' 2>/dev/null');
+            const { stdout: geo } = await exec('xdotool getwindowgeometry --shell ' + id + ' 2>/dev/null');
+            const geoMap = {};
+            for (const line of geo.split('\\n')) {
+              const [key, val] = line.split('=');
+              if (key && val) geoMap[key.toLowerCase()] = parseInt(val);
+            }
+            if (name.trim()) {
+              windows.push({ id, name: name.trim(), x: geoMap.x || 0, y: geoMap.y || 0, width: geoMap.width || 0, height: geoMap.height || 0 });
+            }
+          } catch {}
+        }
+        return { windows, count: windows.length };
+      `,
       inputSchema: { type: 'object', properties: {} },
     },
     {
       name: 'window_focus',
-      description: 'Focus a window by ID or name',
-      code: `const { focusWindow, findWindowByName } = await import('./system-tools.js'); const id = params.id || await findWindowByName(params.name); if (!id) throw new Error('Window not found'); await focusWindow(id); return { focused: true };`,
+      description: 'Focus a window by ID or name (partial match). Use to switch to Chrome, sidebar panels, etc.',
+      code: `
+        let windowId = params.id;
+        if (!windowId && params.name) {
+          const { stdout, exitCode } = await exec('xdotool search --name "' + params.name.replace(/"/g, '\\\\"') + '" 2>/dev/null');
+          if (exitCode === 0 && stdout.trim()) {
+            windowId = stdout.trim().split('\\n')[0];
+          }
+        }
+        if (!windowId) throw new Error('Window not found: ' + (params.name || params.id));
+        await exec('xdotool windowactivate ' + windowId);
+        return { focused: true, windowId };
+      `,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Window ID' },
-          name: { type: 'string', description: 'Window name (partial match)' },
+          id: { type: 'string', description: 'Window ID (from window_list)' },
+          name: { type: 'string', description: 'Window name (partial match, e.g., "Chrome", "Firefox")' },
         },
       },
     },

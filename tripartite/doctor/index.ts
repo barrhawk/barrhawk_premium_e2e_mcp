@@ -1296,6 +1296,100 @@ async function submitPlan(plan: Plan): Promise<PlanSubmitResult | { error: strin
 // =============================================================================
 // Message Handlers
 // =============================================================================
+
+// Track pending plan.execute requests waiting for completion
+const pendingExecuteRequests = new Map<string, {
+  resolve: (result: unknown) => void;
+  reject: (error: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
+  sourceId: string;
+  messageId: string;
+}>();
+
+// Handle plan.execute from mcp-frank (frank_execute tool)
+bridge.on('plan.execute' as any, async (message: BridgeMessage) => {
+  const { intent, url, timeout: requestTimeout } = message.payload as {
+    intent: string;
+    url?: string;
+    timeout?: number;
+  };
+  const sourceId = message.source;
+  const messageId = message.id;
+
+  logger.info(`📥 plan.execute received from ${sourceId}`, { intent, url, messageId });
+
+  try {
+    // Validate intent
+    const intentValidation = validateIntent(intent);
+    if (!intentValidation.valid) {
+      bridge.sendTo(sourceId as any, 'plan.execute.error' as any, {
+        error: intentValidation.error,
+      }, messageId);
+      return;
+    }
+
+    const sanitizedIntent = intentValidation.sanitized!;
+
+    // Prepend URL context if provided
+    const fullIntent = url ? `Navigate to ${url} and then: ${sanitizedIntent}` : sanitizedIntent;
+
+    // Generate plan
+    const plan = generatePlan(fullIntent);
+
+    // Validate plan
+    const planValidation = validatePlan(plan.steps);
+    if (!planValidation.valid) {
+      bridge.sendTo(sourceId as any, 'plan.execute.error' as any, {
+        error: 'Generated plan failed validation',
+        validationErrors: planValidation.errors,
+      }, messageId);
+      return;
+    }
+
+    // Submit plan to Igor
+    const submitResult = await submitPlan(plan);
+
+    if ('error' in submitResult) {
+      bridge.sendTo(sourceId as any, 'plan.execute.error' as any, {
+        error: submitResult.error,
+      }, messageId);
+      return;
+    }
+
+    logger.info(`📤 plan.execute: plan ${plan.id} submitted, waiting for completion`, {
+      planId: plan.id,
+      assignedTo: submitResult.assignedTo,
+    });
+
+    // Wait for the plan to complete
+    const effectiveTimeout = requestTimeout || 120000;
+
+    const completionResult = await new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingExecuteRequests.delete(plan.id);
+        reject(new Error(`Plan execution timeout after ${effectiveTimeout}ms`));
+      }, effectiveTimeout);
+
+      pendingExecuteRequests.set(plan.id, {
+        resolve,
+        reject,
+        timeout: timer,
+        sourceId,
+        messageId,
+      });
+    });
+
+    // Send success response back to mcp-frank
+    bridge.sendTo(sourceId as any, 'plan.execute.result' as any, completionResult, messageId);
+
+  } catch (err: any) {
+    logger.error(`plan.execute failed: ${err.message}`, { intent, error: err.message });
+    bridge.sendTo(sourceId as any, 'plan.execute.error' as any, {
+      error: err.message || 'Plan execution failed',
+    }, messageId);
+  }
+});
+
 bridge.on('plan.accepted', (message: BridgeMessage) => {
   const { planId } = message.payload as { planId: string };
   const correlationId = message.correlationId;
@@ -1581,6 +1675,26 @@ bridge.on('plan.completed', (message: BridgeMessage) => {
     logger.info(`Plan ${planId} ${success ? 'completed successfully' : 'failed'}`, {
       planId, success, correlationId, igor: igorSource, route: routeId,
     });
+
+    // Resolve any pending plan.execute request waiting on this plan
+    if (pendingExecuteRequests.has(planId)) {
+      const pending = pendingExecuteRequests.get(planId)!;
+      clearTimeout(pending.timeout);
+      pendingExecuteRequests.delete(planId);
+
+      const result = {
+        planId,
+        success,
+        intent: state.plan.intent,
+        steps: state.plan.steps.length,
+        results: state.results,
+        errors: state.errors,
+        executedBy: igorSource,
+      };
+
+      logger.info(`📤 plan.execute: resolving request for plan ${planId}`, { success });
+      pending.resolve(result);
+    }
 
     // Mark the Igor as idle
     markIgorIdle(igorSource, success);

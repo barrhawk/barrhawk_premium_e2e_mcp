@@ -2,6 +2,46 @@
 
 All notable changes to BarrHawk E2E will be documented in this file.
 
+## [0.3.1] - 2026-01-28
+
+### Added
+
+- **Dashboard Test Reports** - War Room dashboard now displays completed test results:
+  - Test Results sidebar section with PASS/FAIL badges
+  - Real-time stats from Bridge `/reports` endpoint
+  - Metrics bar shows Executed/Passed/Failed/Success%
+  - New `/api/reports` endpoint for external consumers
+  - Scrollable results list, most recent first, with timestamps and step counts
+
+- **Doctor plan.execute Handler** - Fixed `frank_execute` flow:
+  - Doctor now properly handles `plan.execute` messages from MCP-Frank
+  - Plans execute end-to-end through Doctor → Igor → Frankenstein
+  - Reports stored in Bridge and displayed in dashboard
+
+### Changed
+
+- **Dashboard Visual Overhaul** - Professional dark theme redesign:
+  - Refined color palette with better contrast
+  - Clean section headers with count badges
+  - Monospace font for metrics, badges, timestamps
+  - Slim scrollbars, hover states, improved typography
+  - Igor → Frank pipeline visualization with progress bar
+
+- **Frankenstein System Tools** - Extended OS-level automation:
+  - Enhanced screenshot, keyboard, mouse, window management
+  - Better error handling and timeout management
+
+- **MCP-Frank Server** - Updated to latest tool definitions:
+  - All frank_* tools with correct signatures
+  - Swarm execution improvements
+
+### Fixed
+
+- Doctor properly routes `plan.execute` to Igor for execution
+- Dashboard now runs `server.ts` (war room) instead of `server.tsx` (legacy)
+
+---
+
 ## [0.3.0] - 2026-01-26
 
 ### Added

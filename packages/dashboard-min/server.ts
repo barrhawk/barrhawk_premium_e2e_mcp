@@ -30,6 +30,8 @@ interface DashboardState {
   plans: any[];
   igors: any[];
   events: any[];
+  reports: any[];
+  stats: { total: number; passed: number; failed: number; successRate: string };
   lastScreenshot: string | null;
   lastUpdate: number;
 }
@@ -43,6 +45,8 @@ const state: DashboardState = {
   plans: [],
   igors: [],
   events: [],
+  reports: [],
+  stats: { total: 0, passed: 0, failed: 0, successRate: '-' },
   lastScreenshot: null,
   lastUpdate: 0,
 };
@@ -95,7 +99,7 @@ async function fetchJson(url: string): Promise<any> {
 
 // Update state
 async function updateState() {
-  const [bridge, doctor, igor, frank, doctorFrank, plans, igors] = await Promise.all([
+  const [bridge, doctor, igor, frank, doctorFrank, plans, igors, reports] = await Promise.all([
     fetchJson(`${BRIDGE_URL}/health`),
     fetchJson(`${DOCTOR_URL}/health`),
     fetchJson(`${IGOR_URL}/health`),
@@ -103,6 +107,7 @@ async function updateState() {
     fetchJson(`${DOCTOR_URL}/frank`),
     fetchJson(`${DOCTOR_URL}/plans`),
     fetchJson(`${DOCTOR_URL}/igors`),
+    fetchJson(`${BRIDGE_URL}/reports`),
   ]);
 
   state.bridge = bridge;
@@ -112,6 +117,15 @@ async function updateState() {
   state.doctorFrank = doctorFrank;
   state.plans = plans?.plans || [];
   state.igors = igors?.igors || [];
+
+  const reportList = Array.isArray(reports) ? reports : (reports?.reports || []);
+  state.reports = reportList;
+  const total = reportList.length;
+  const passed = reportList.filter((r: any) => r.success === true).length;
+  const failed = reportList.filter((r: any) => r.success === false).length;
+  const successRate = total > 0 ? ((passed / total) * 100).toFixed(0) + '%' : '-';
+  state.stats = { total, passed, failed, successRate };
+
   state.lastUpdate = Date.now();
 
   broadcast({ type: 'state', data: state });
@@ -147,86 +161,158 @@ const HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BarrHawk War Room</title>
   <style>
-    :root { --bg:#0a0a0f; --card:#111118; --border:#1e1e2a; --text:#e0e0e8; --muted:#555; --green:#10b981; --red:#ef4444; --yellow:#f59e0b; --blue:#3b82f6; --purple:#8b5cf6; }
-    * { box-sizing:border-box; margin:0; padding:0; }
-    body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; font-size:13px; }
+    :root {
+      --bg: #09090b;
+      --card: #0f0f13;
+      --card-elevated: #141419;
+      --border: #1c1c26;
+      --border-subtle: #16161e;
+      --text: #e4e4e9;
+      --text-secondary: #a0a0b0;
+      --muted: #5a5a6e;
+      --green: #22c55e;
+      --green-dim: rgba(34,197,94,0.12);
+      --red: #ef4444;
+      --red-dim: rgba(239,68,68,0.12);
+      --yellow: #eab308;
+      --yellow-dim: rgba(234,179,8,0.12);
+      --blue: #3b82f6;
+      --blue-dim: rgba(59,130,246,0.12);
+      --purple: #7c3aed;
+      --purple-dim: rgba(124,58,237,0.12);
+      --accent: #818cf8;
+      --radius: 6px;
+      --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 
-    .layout { display:grid; grid-template-columns:1fr 320px; grid-template-rows:auto 1fr auto; height:100vh; }
+    .layout { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: auto 1fr auto; height: 100vh; }
 
-    .header { grid-column:1/-1; border-bottom:1px solid var(--border); padding:8px 16px; display:flex; justify-content:space-between; align-items:center; background:#08080c; }
-    .logo { font-weight:700; font-size:14px; background:linear-gradient(135deg,#6366f1,#8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-    .status-row { display:flex; gap:12px; }
-    .status-dot { display:flex; align-items:center; gap:4px; font-size:11px; }
-    .dot { width:6px; height:6px; border-radius:50%; }
-    .dot.on { background:var(--green); box-shadow:0 0 6px var(--green); }
-    .dot.off { background:var(--red); }
+    /* Header */
+    .header { grid-column: 1/-1; border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; background: var(--card); }
+    .logo { font-weight: 700; font-size: 15px; letter-spacing: -0.02em; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+    .logo-icon { width: 20px; height: 20px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+    .status-row { display: flex; gap: 16px; }
+    .status-dot { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); font-weight: 500; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; transition: all 0.3s; }
+    .dot.on { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    .dot.off { background: var(--muted); opacity: 0.5; }
 
-    .main { display:flex; flex-direction:column; overflow:hidden; }
+    /* Main panel */
+    .main { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+    .browser-panel { flex: 1; background: #000; position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; }
+    .browser-panel img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .browser-empty { color: var(--muted); text-align: center; }
+    .browser-empty .empty-icon { font-size: 28px; opacity: 0.25; margin-bottom: 12px; }
+    .browser-empty p { font-size: 12px; color: var(--muted); line-height: 1.6; }
 
-    .browser-panel { flex:1; background:#000; position:relative; display:flex; align-items:center; justify-content:center; min-height:0; }
-    .browser-panel img { max-width:100%; max-height:100%; object-fit:contain; }
-    .browser-empty { color:var(--muted); text-align:center; }
-    .browser-empty p { margin-top:8px; font-size:11px; }
+    /* Agent bar */
+    .agents-bar { display: flex; gap: 6px; padding: 10px 14px; background: var(--card); border-top: 1px solid var(--border); overflow-x: auto; align-items: center; }
+    .agent { padding: 8px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; white-space: nowrap; min-width: 90px; transition: all 0.2s; }
+    .agent.active { border-color: rgba(34,197,94,0.3); background: var(--green-dim); }
+    .agent.busy { border-color: rgba(234,179,8,0.3); background: var(--yellow-dim); animation: pulse 2s ease-in-out infinite; }
+    .agent.error { border-color: rgba(239,68,68,0.3); background: var(--red-dim); }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+    .agent-name { font-weight: 600; display: block; font-size: 11px; }
+    .agent-status { color: var(--muted); font-size: 10px; margin-top: 1px; }
+    .agent-task { color: var(--blue); font-size: 9px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; }
+    .flow-arrow { color: var(--border); font-size: 14px; padding: 0 2px; font-family: var(--font-mono); }
+    .flow-arrow.active { color: var(--yellow); animation: pulse 1s infinite; }
 
-    .agents-bar { display:flex; gap:8px; padding:8px 12px; background:var(--card); border-top:1px solid var(--border); overflow-x:auto; align-items:center; }
-    .agent { padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font-size:11px; white-space:nowrap; min-width:100px; }
-    .agent.active { border-color:var(--green); background:rgba(16,185,129,0.1); }
-    .agent.busy { border-color:var(--yellow); background:rgba(245,158,11,0.1); animation: pulse 1.5s infinite; }
-    .agent.error { border-color:var(--red); background:rgba(239,68,68,0.1); }
-    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
-    .agent-name { font-weight:600; display:block; }
-    .agent-status { color:var(--muted); font-size:10px; }
-    .agent-task { color:var(--blue); font-size:9px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; }
-    .flow-arrow { color:var(--muted); font-size:16px; padding:0 4px; }
-    .flow-arrow.active { color:var(--yellow); animation: pulse 1s infinite; }
+    /* Sidebar */
+    .sidebar { border-left: 1px solid var(--border); display: flex; flex-direction: column; background: var(--card); overflow: hidden; }
 
-    .sidebar { border-left:1px solid var(--border); display:flex; flex-direction:column; background:var(--card); }
+    .section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .section-header { font-size: 10px; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+    .section-badge { font-size: 9px; background: var(--border); color: var(--text-secondary); padding: 1px 6px; border-radius: 10px; font-weight: 500; }
 
-    .command-box { padding:12px; border-bottom:1px solid var(--border); }
-    .command-box h3 { font-size:11px; color:var(--muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em; }
-    .command-input { display:flex; gap:6px; }
-    .command-input input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:8px 10px; color:var(--text); font-size:12px; }
-    .command-input input:focus { outline:none; border-color:var(--purple); }
-    .command-input button { background:var(--purple); border:none; border-radius:4px; padding:8px 12px; color:#fff; font-size:11px; font-weight:600; cursor:pointer; }
-    .command-input button:hover { opacity:0.9; }
-    .command-hint { font-size:10px; color:var(--muted); margin-top:6px; }
+    /* Command */
+    .command-input { display: flex; gap: 6px; }
+    .command-input input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 12px; color: var(--text); font-size: 12px; transition: border-color 0.2s; }
+    .command-input input::placeholder { color: var(--muted); }
+    .command-input input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(129,140,248,0.15); }
+    .command-input button { background: var(--accent); border: none; border-radius: var(--radius); padding: 9px 16px; color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; letter-spacing: 0.02em; }
+    .command-input button:hover { opacity: 0.85; }
 
-    .plan-box { padding:12px; border-bottom:1px solid var(--border); flex:0 0 auto; max-height:200px; overflow-y:auto; }
-    .plan-box h3 { font-size:11px; color:var(--muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em; }
-    .plan-empty { color:var(--muted); font-size:11px; }
-    .plan { background:var(--bg); border-radius:6px; padding:8px; margin-bottom:6px; border-left:3px solid var(--purple); }
-    .plan-id { font-size:10px; color:var(--muted); }
-    .plan-intent { font-size:12px; margin:4px 0; }
-    .plan-steps { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
-    .step { font-size:10px; padding:2px 6px; border-radius:3px; background:var(--border); }
-    .step.done { background:rgba(16,185,129,0.2); color:var(--green); }
-    .step.active { background:rgba(59,130,246,0.2); color:var(--blue); }
-    .step.failed { background:rgba(239,68,68,0.2); color:var(--red); }
+    /* Plans */
+    .plan-list { max-height: 160px; overflow-y: auto; }
+    .plan-empty { color: var(--muted); font-size: 11px; padding: 4px 0; }
+    .plan { background: var(--bg); border-radius: var(--radius); padding: 10px; margin-bottom: 6px; border-left: 3px solid var(--purple); }
+    .plan-id { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
+    .plan-intent { font-size: 12px; margin: 4px 0 6px; color: var(--text); line-height: 1.4; }
+    .plan-steps { display: flex; gap: 4px; flex-wrap: wrap; }
+    .step { font-size: 9px; padding: 2px 7px; border-radius: 3px; background: var(--border); color: var(--text-secondary); font-weight: 500; }
+    .step.done { background: var(--green-dim); color: var(--green); }
+    .step.active { background: var(--blue-dim); color: var(--blue); }
+    .step.failed { background: var(--red-dim); color: var(--red); }
 
-    .events-box { flex:1; display:flex; flex-direction:column; min-height:0; }
-    .events-box h3 { font-size:11px; color:var(--muted); padding:12px 12px 8px; text-transform:uppercase; letter-spacing:0.05em; }
-    .events { flex:1; overflow-y:auto; padding:0 12px 12px; }
-    .event { font-family:'SF Mono',Monaco,monospace; font-size:10px; padding:4px 0; border-bottom:1px solid var(--border); display:flex; gap:8px; }
-    .event-time { color:var(--muted); flex-shrink:0; }
-    .event-type { flex-shrink:0; min-width:100px; }
-    .event-type.completed,.event-type.created { color:var(--green); }
-    .event-type.failed,.event-type.error { color:var(--red); }
-    .event-type.started,.event-type.submit { color:var(--blue); }
-    .event-data { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* Test Results */
+    .results-list { max-height: 200px; overflow-y: auto; }
+    .result { background: var(--bg); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 6px; transition: background 0.15s; }
+    .result:hover { background: var(--card-elevated); }
+    .result.pass { border-left: 3px solid var(--green); }
+    .result.fail { border-left: 3px solid var(--red); }
+    .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .result-badge { font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+    .result-badge.pass { background: var(--green-dim); color: var(--green); }
+    .result-badge.fail { background: var(--red-dim); color: var(--red); }
+    .result-time { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
+    .result-intent { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
+    .result-meta { font-size: 10px; color: var(--muted); margin-top: 4px; display: flex; gap: 10px; align-items: center; }
+    .result-meta span { display: flex; align-items: center; gap: 3px; }
 
-    .metrics-bar { grid-column:1/-1; display:flex; gap:1px; background:var(--border); border-top:1px solid var(--border); }
-    .metric { flex:1; padding:8px 12px; background:var(--card); text-align:center; }
-    .metric-value { font-size:16px; font-weight:700; }
-    .metric-label { font-size:9px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
-    .metric-value.green { color:var(--green); }
-    .metric-value.red { color:var(--red); }
-    .metric-value.yellow { color:var(--yellow); }
+    /* Frank Flow */
+    .frank-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .frank-flow-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .frank-flow-label { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+    .frank-flow-track { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .frank-flow-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s ease; }
+    .frank-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .frank-stat { background: var(--bg); border-radius: var(--radius); padding: 8px 10px; }
+    .frank-stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+    .frank-stat-value { font-size: 16px; font-weight: 700; margin-top: 2px; font-family: var(--font-mono); }
+    .frank-stat-value.red { color: var(--red); }
+    .frank-stat-value.green { color: var(--green); }
+    .frank-pending { margin-top: 8px; font-size: 10px; color: var(--muted); }
+
+    /* Events */
+    .events-box { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    .events-header { padding: 14px 16px 10px; }
+    .events { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+    .event { font-family: var(--font-mono); font-size: 10px; padding: 5px 0; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px; align-items: baseline; }
+    .event-time { color: var(--muted); flex-shrink: 0; font-size: 9px; }
+    .event-type { flex-shrink: 0; min-width: 90px; font-weight: 600; font-size: 10px; }
+    .event-type.completed,.event-type.created { color: var(--green); }
+    .event-type.failed,.event-type.error { color: var(--red); }
+    .event-type.started,.event-type.submit { color: var(--blue); }
+    .event-data { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+
+    /* Metrics Bar */
+    .metrics-bar { grid-column: 1/-1; display: flex; background: var(--card); border-top: 1px solid var(--border); }
+    .metric { flex: 1; padding: 12px 16px; text-align: center; position: relative; }
+    .metric + .metric { border-left: 1px solid var(--border); }
+    .metric-value { font-size: 20px; font-weight: 700; font-family: var(--font-mono); letter-spacing: -0.02em; }
+    .metric-label { font-size: 9px; color: var(--muted); text-transform: uppercase; margin-top: 2px; letter-spacing: 0.06em; font-weight: 500; }
+    .metric-value.green { color: var(--green); }
+    .metric-value.red { color: var(--red); }
+    .metric-value.yellow { color: var(--yellow); }
+    .metric-value.neutral { color: var(--text-secondary); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
   </style>
 </head>
 <body>
   <div class="layout">
     <header class="header">
-      <div class="logo">BarrHawk War Room</div>
+      <div class="logo">
+        <div class="logo-icon">B</div>
+        BarrHawk War Room
+      </div>
       <div class="status-row">
         <div class="status-dot"><div class="dot" id="s-bridge"></div>Bridge</div>
         <div class="status-dot"><div class="dot" id="s-doctor"></div>Doctor</div>
@@ -238,7 +324,7 @@ const HTML = `<!DOCTYPE html>
     <div class="main">
       <div class="browser-panel" id="browser-panel">
         <div class="browser-empty" id="browser-empty">
-          <div style="font-size:32px;opacity:0.3">🖥️</div>
+          <div class="empty-icon">&#9635;</div>
           <p>No browser session active</p>
           <p>Submit a test intent to start</p>
         </div>
@@ -250,64 +336,64 @@ const HTML = `<!DOCTYPE html>
     </div>
 
     <div class="sidebar">
-      <div class="command-box">
-        <h3>Command</h3>
+      <div class="section">
+        <div class="section-header">Command</div>
         <div class="command-input">
           <input type="text" id="cmd-input" placeholder="Test the login flow..." />
           <button onclick="submitIntent()">Run</button>
         </div>
-        <div class="command-hint">Enter a test intent in natural language</div>
       </div>
 
-      <div class="plan-box">
-        <h3>Active Plans</h3>
-        <div id="plans"><div class="plan-empty">No active plans</div></div>
+      <div class="section">
+        <div class="section-header">Active Plans <span class="section-badge" id="plan-count">0</span></div>
+        <div class="plan-list" id="plans"><div class="plan-empty">No active plans</div></div>
       </div>
 
-      <div class="plan-box" id="frank-box" style="border-left:3px solid var(--purple);">
-        <h3>🧪 Igor → Frank Flow</h3>
-        <div id="frank-flow">
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-            <div style="font-size:20px;">🤖</div>
-            <div style="flex:1;height:2px;background:var(--border);position:relative;">
-              <div id="flow-progress" style="height:2px;background:var(--purple);width:0%;transition:width 0.3s;"></div>
-            </div>
-            <div style="font-size:20px;">🔬</div>
-          </div>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">
-            Igor fails <span id="frank-threshold">2</span>x → Frank creates tool
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
-            <div>
-              <div style="color:var(--muted);font-size:9px;">Failure Patterns</div>
-              <div id="frank-patterns" style="font-weight:600;color:var(--red);">0</div>
-            </div>
-            <div>
-              <div style="color:var(--muted);font-size:9px;">Tools Created</div>
-              <div id="frank-tools" style="font-weight:600;color:var(--green);">0</div>
-            </div>
-          </div>
-          <div id="pending-requests" style="margin-top:8px;font-size:10px;"></div>
+      <div class="section">
+        <div class="section-header">Test Results <span class="section-badge" id="result-count">0</span></div>
+        <div class="results-list" id="results"><div class="plan-empty">No completed tests</div></div>
+      </div>
+
+      <div class="frank-section">
+        <div class="section-header">Igor &rarr; Frank Pipeline</div>
+        <div class="frank-flow-bar">
+          <div class="frank-flow-label">Igor</div>
+          <div class="frank-flow-track"><div class="frank-flow-fill" id="flow-progress" style="width:0%"></div></div>
+          <div class="frank-flow-label">Frank</div>
         </div>
+        <div class="frank-stats">
+          <div class="frank-stat">
+            <div class="frank-stat-label">Failures</div>
+            <div class="frank-stat-value red" id="frank-patterns">0</div>
+          </div>
+          <div class="frank-stat">
+            <div class="frank-stat-label">Tools Built</div>
+            <div class="frank-stat-value green" id="frank-tools">0</div>
+          </div>
+        </div>
+        <div class="frank-pending" id="pending-requests"></div>
+        <span id="frank-threshold" style="display:none">2</span>
       </div>
 
       <div class="events-box">
-        <h3>Live Events</h3>
+        <div class="events-header">
+          <div class="section-header" style="margin-bottom:0">Live Events</div>
+        </div>
         <div class="events" id="events"></div>
       </div>
     </div>
 
     <div class="metrics-bar">
-      <div class="metric"><div class="metric-value" id="m-plans">0</div><div class="metric-label">Plans</div></div>
-      <div class="metric"><div class="metric-value" id="m-agents">1</div><div class="metric-label">Agents</div></div>
-      <div class="metric"><div class="metric-value green" id="m-tools">0</div><div class="metric-label">Tools Created</div></div>
-      <div class="metric"><div class="metric-value" id="m-patterns">0</div><div class="metric-label">Patterns</div></div>
-      <div class="metric"><div class="metric-value green" id="m-success">-</div><div class="metric-label">Success Rate</div></div>
+      <div class="metric"><div class="metric-value neutral" id="m-executed">0</div><div class="metric-label">Executed</div></div>
+      <div class="metric"><div class="metric-value green" id="m-passed">0</div><div class="metric-label">Passed</div></div>
+      <div class="metric"><div class="metric-value red" id="m-failed">0</div><div class="metric-label">Failed</div></div>
+      <div class="metric"><div class="metric-value neutral" id="m-agents">1</div><div class="metric-label">Agents</div></div>
+      <div class="metric"><div class="metric-value green" id="m-success">-</div><div class="metric-label">Success %</div></div>
     </div>
   </div>
 
 <script>
-let ws, screenshotInterval;
+let ws;
 const events = [];
 
 function connect() {
@@ -323,143 +409,126 @@ function connect() {
 }
 
 function updateUI(s) {
-  // Component status dots
   setDot('s-bridge', s.bridge?.status === 'healthy');
   setDot('s-doctor', s.doctor?.status === 'healthy');
   setDot('s-igor', s.igor?.status === 'healthy');
   setDot('s-frank', s.frankenstein?.status === 'healthy');
 
-  // Metrics
-  document.getElementById('m-plans').textContent = s.plans?.length || 0;
-  document.getElementById('m-agents').textContent = (s.igors?.length || 0) + 1;
-  document.getElementById('m-tools').textContent = s.doctorFrank?.metrics?.toolsCreatedTotal || 0;
-  document.getElementById('m-patterns').textContent = s.doctorFrank?.failurePatterns?.total || 0;
-  const rate = s.doctor?.experience?.successRate || '-';
-  document.getElementById('m-success').textContent = rate;
-  document.getElementById('m-success').className = 'metric-value ' + (rate.includes('100') ? 'green' : parseFloat(rate) < 50 ? 'red' : 'yellow');
+  const stats = s.stats || { total:0, passed:0, failed:0, successRate:'-' };
+  setText('m-executed', stats.total);
+  setText('m-passed', stats.passed);
+  setText('m-failed', stats.failed);
+  setText('m-agents', (s.igors?.length || 0) + 1);
+  setText('m-success', stats.successRate);
+  const pct = parseFloat(stats.successRate);
+  document.getElementById('m-success').className = 'metric-value ' + (isNaN(pct) ? 'neutral' : pct >= 80 ? 'green' : pct < 50 ? 'red' : 'yellow');
 
-  // Plans
   renderPlans(s.plans || []);
-
-  // Agents flow: Doctor → Igor(s) → Frank
+  renderReports(s.reports || []);
   renderAgents(s.igors || [], s.igor, s.doctor, s.frankenstein);
-
-  // Frank flow visualization
   updateFrankFlow(s.doctorFrank);
 
-  // Browser
-  if (s.frankenstein?.browserActive) {
-    fetchScreenshot();
-  }
+  if (s.frankenstein?.browserActive) fetchScreenshot();
 }
 
-function setDot(id, on) {
-  document.getElementById(id).className = 'dot ' + (on ? 'on' : 'off');
-}
+function setText(id, v) { document.getElementById(id).textContent = v; }
+function setDot(id, on) { document.getElementById(id).className = 'dot ' + (on ? 'on' : 'off'); }
 
 function renderPlans(plans) {
+  setText('plan-count', plans.length);
   const el = document.getElementById('plans');
-  if (!plans.length) {
-    el.innerHTML = '<div class="plan-empty">No active plans</div>';
-    return;
-  }
-  el.innerHTML = plans.slice(0, 3).map(p =>
-    '<div class="plan">' +
-    '<div class="plan-id">' + (p.id || '').substring(0,8) + '</div>' +
+  if (!plans.length) { el.innerHTML = '<div class="plan-empty">No active plans</div>'; return; }
+  el.innerHTML = plans.slice(0, 5).map(p =>
+    '<div class="plan"><div class="plan-id">' + (p.id || '').substring(0,8) + '</div>' +
     '<div class="plan-intent">' + esc(p.intent || 'Unknown intent') + '</div>' +
     '<div class="plan-steps">' + (p.steps || []).map((st,i) =>
-      '<span class="step ' + (st.status || '') + '">' + (i+1) + '. ' + esc(st.action || '') + '</span>'
+      '<span class="step ' + (st.status || '') + '">' + (i+1) + '</span>'
     ).join('') + '</div></div>'
   ).join('');
 }
 
+function renderReports(reports) {
+  setText('result-count', reports.length);
+  const el = document.getElementById('results');
+  if (!reports.length) { el.innerHTML = '<div class="plan-empty">No completed tests</div>'; return; }
+  const sorted = reports.slice().sort((a,b) => (b.completedAt || b.timestamp || 0) - (a.completedAt || a.timestamp || 0));
+  el.innerHTML = sorted.slice(0, 15).map(r => {
+    const ok = r.success === true;
+    const cls = ok ? 'pass' : 'fail';
+    const rawIntent = r.data?.intent || r.intent || r.planId || 'Unknown';
+    const intent = rawIntent.length > 80 ? rawIntent.substring(0,77) + '...' : rawIntent;
+    const steps = r.data?.steps || r.steps?.length || r.stepCount || 0;
+    const time = r.completedAt || r.timestamp;
+    const ts = time ? new Date(time).toLocaleTimeString() : '';
+    return '<div class="result ' + cls + '">' +
+      '<div class="result-header">' +
+      '<span class="result-badge ' + cls + '">' + (ok ? 'PASS' : 'FAIL') + '</span>' +
+      '<span class="result-time">' + ts + '</span></div>' +
+      '<div class="result-intent" title="' + esc(rawIntent) + '">' + esc(intent) + '</div>' +
+      '<div class="result-meta"><span>' + steps + ' steps</span></div></div>';
+  }).join('');
+}
+
 function renderAgents(igors, mainIgor, doctor, frank) {
   const el = document.getElementById('agents-bar');
-
-  // Doctor box
-  let html = '<div class="agent active" style="border-color:var(--purple);">' +
-    '<span class="agent-name">🩺 Doctor</span>' +
+  let html = '<div class="agent active" style="border-color:rgba(124,58,237,0.3);background:var(--purple-dim);">' +
+    '<span class="agent-name">Doctor</span>' +
     '<span class="agent-status">Plans: ' + (doctor?.activePlans || 0) + '</span></div>';
-
-  html += '<span class="flow-arrow">→</span>';
-
-  // Main Igor
+  html += '<span class="flow-arrow">&rarr;</span>';
   const mainStatus = mainIgor?.executionStatus || 'idle';
   html += '<div class="agent ' + (mainStatus === 'executing' ? 'busy' : 'active') + '">' +
-    '<span class="agent-name">🤖 Igor</span>' +
+    '<span class="agent-name">Igor</span>' +
     '<span class="agent-status">' + mainStatus + '</span></div>';
-
-  // Spawned Igors
   if (igors && igors.length > 0) {
     igors.forEach((ig, i) => {
       const st = ig.status || 'idle';
       html += '<div class="agent ' + (st === 'executing' ? 'busy' : st === 'error' ? 'error' : 'active') + '">' +
-        '<span class="agent-name">🤖 Igor-' + (i+1) + '</span>' +
+        '<span class="agent-name">Igor-' + (i+1) + '</span>' +
         '<span class="agent-status">' + st + '</span>' +
-        (ig.currentTask ? '<div class="agent-task">' + esc(ig.currentTask).substring(0,20) + '</div>' : '') +
-        '</div>';
+        (ig.currentTask ? '<div class="agent-task">' + esc(ig.currentTask).substring(0,25) + '</div>' : '') + '</div>';
     });
   }
-
-  html += '<span class="flow-arrow" id="igor-frank-arrow">→</span>';
-
-  // Frankenstein
+  html += '<span class="flow-arrow" id="igor-frank-arrow">&rarr;</span>';
   const frankActive = frank?.browserActive;
-  html += '<div class="agent ' + (frankActive ? 'busy' : 'active') + '" style="border-color:var(--purple);">' +
-    '<span class="agent-name">🔬 Frank</span>' +
+  html += '<div class="agent ' + (frankActive ? 'busy' : 'active') + '" style="border-color:rgba(124,58,237,0.3);background:var(--purple-dim);">' +
+    '<span class="agent-name">Frank</span>' +
     '<span class="agent-status">' + (frank?.dynamicTools?.total || 0) + ' tools</span></div>';
-
   el.innerHTML = html;
 }
 
 function updateFrankFlow(doctorFrank) {
   if (!doctorFrank) return;
-
-  const threshold = doctorFrank.config?.failureThreshold || 2;
   const patterns = doctorFrank.failurePatterns?.total || 0;
   const pending = doctorFrank.pendingRequests?.total || 0;
   const tools = doctorFrank.metrics?.toolsCreatedTotal || 0;
-
-  document.getElementById('frank-threshold').textContent = threshold;
-  document.getElementById('frank-patterns').textContent = patterns;
-  document.getElementById('frank-tools').textContent = tools;
-
-  // Progress bar based on pending requests
+  setText('frank-patterns', patterns);
+  setText('frank-tools', tools);
   const progress = pending > 0 ? 100 : (patterns > 0 ? 50 : 0);
   document.getElementById('flow-progress').style.width = progress + '%';
-
-  // Arrow animation when creating
   const arrow = document.getElementById('igor-frank-arrow');
   if (arrow) arrow.className = 'flow-arrow' + (pending > 0 ? ' active' : '');
-
-  // Pending requests list
   const reqEl = document.getElementById('pending-requests');
   if (pending > 0 && doctorFrank.pendingRequests?.requests) {
-    reqEl.innerHTML = '<div style="color:var(--yellow);">⏳ Creating tools...</div>' +
-      doctorFrank.pendingRequests.requests.slice(0,2).map(r =>
-        '<div style="color:var(--muted);">• ' + esc(r.pattern || 'unknown') + '</div>'
-      ).join('');
+    reqEl.innerHTML = '<span style="color:var(--yellow)">Creating tools...</span>';
   } else if (tools > 0) {
-    reqEl.innerHTML = '<div style="color:var(--green);">✓ Tools ready</div>';
+    reqEl.innerHTML = '<span style="color:var(--green)">Tools ready</span>';
   } else {
-    reqEl.innerHTML = '<div style="color:var(--muted);">No tool creation in progress</div>';
+    reqEl.innerHTML = '';
   }
 }
 
 function addEvent(ev) {
   events.unshift(ev);
   if (events.length > 30) events.pop();
-
   const el = document.getElementById('events');
   el.innerHTML = events.map(e => {
     const t = e.type || '';
     const cls = t.includes('completed') || t.includes('created') ? 'completed' :
                 t.includes('failed') || t.includes('error') ? 'failed' :
                 t.includes('started') || t.includes('submit') ? 'started' : '';
-    return '<div class="event">' +
-      '<span class="event-time">' + new Date(e.time || Date.now()).toLocaleTimeString() + '</span>' +
+    return '<div class="event"><span class="event-time">' + new Date(e.time || Date.now()).toLocaleTimeString() + '</span>' +
       '<span class="event-type ' + cls + '">' + t + '</span>' +
-      '<span class="event-data">' + esc(JSON.stringify(e.payload || {}).substring(0,50)) + '</span></div>';
+      '<span class="event-data">' + esc(JSON.stringify(e.payload || {}).substring(0,60)) + '</span></div>';
   }).join('');
 }
 
@@ -467,16 +536,10 @@ async function submitIntent() {
   const input = document.getElementById('cmd-input');
   const intent = input.value.trim();
   if (!intent) return;
-
   input.value = '';
   addEvent({ type: 'intent.submitted', time: Date.now(), payload: { intent } });
-
   try {
-    const res = await fetch('/api/plan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ intent, url: 'https://example.com' })
-    });
+    const res = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intent, url: 'https://example.com' }) });
     const data = await res.json();
     addEvent({ type: 'plan.created', time: Date.now(), payload: data });
   } catch (err) {
@@ -499,29 +562,14 @@ async function fetchScreenshot() {
   } catch {}
 }
 
-function loadScreenshot(path) {
-  if (path) fetchScreenshot();
-}
+function loadScreenshot(path) { if (path) fetchScreenshot(); }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-// Enter key to submit
-document.getElementById('cmd-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') submitIntent();
-});
+document.getElementById('cmd-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitIntent(); });
 
-// Start
 connect();
-// Poll screenshots every 2s when browser active
-setInterval(() => {
-  if (document.getElementById('browser-img').style.display !== 'none') {
-    fetchScreenshot();
-  }
-}, 2000);
+setInterval(() => { if (document.getElementById('browser-img').style.display !== 'none') fetchScreenshot(); }, 2000);
 </script>
 </body>
 </html>`;
@@ -564,6 +612,11 @@ Bun.serve({
         } catch {}
       }
       return new Response('', { status: 204 });
+    }
+
+    // API: Reports
+    if (url.pathname === '/api/reports') {
+      return Response.json({ reports: state.reports, stats: state.stats });
     }
 
     // API: State

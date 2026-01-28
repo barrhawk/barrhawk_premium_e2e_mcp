@@ -150,14 +150,40 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           return;
         }
 
-        const opts = payload as { headless?: boolean; viewport?: { width: number; height: number } };
-        browser = await chromium.launch({ headless: opts.headless ?? true });
-        browserLaunchCount++;
+        const opts = payload as {
+          headless?: boolean;
+          viewport?: { width: number; height: number };
+          extensions?: string[];
+        };
 
-        context = await browser.newContext({
-          viewport: opts.viewport || { width: 1280, height: 720 },
-        });
-        page = await context.newPage();
+        // If extensions are specified, use persistent context for extension support
+        if (opts.extensions && opts.extensions.length > 0) {
+          const extensionPaths = opts.extensions.join(',');
+          const userDataDir = `/tmp/frank-ext-profile-${Date.now()}`;
+          logger.info('Launching browser with extensions', { extensions: opts.extensions });
+
+          context = await chromium.launchPersistentContext(userDataDir, {
+            headless: false, // Extensions require headed mode
+            args: [
+              `--disable-extensions-except=${extensionPaths}`,
+              `--load-extension=${extensionPaths}`,
+              '--no-first-run',
+              '--disable-popup-blocking',
+            ],
+            viewport: opts.viewport || { width: 1280, height: 720 },
+          });
+
+          // PersistentContext doesn't have a separate browser object
+          browser = (context as any).browser?.() || null;
+          page = context.pages()[0] || await context.newPage();
+        } else {
+          browser = await chromium.launch({ headless: opts.headless ?? true });
+          context = await browser.newContext({
+            viewport: opts.viewport || { width: 1280, height: 720 },
+          });
+          page = await context.newPage();
+        }
+        browserLaunchCount++;
 
         // Attach console listener
         page.on('console', (msg) => {
@@ -532,6 +558,169 @@ bridge.on('tool.export', async (message: BridgeMessage) => {
     const error = err instanceof Error ? err.message : String(err);
     logger.error(`Failed to export tool ${toolId}:`, { error, correlationId });
     bridge.sendTo(replyTo, 'tool.error', { error, operation: 'export', toolId }, id);
+  }
+});
+
+// =============================================================================
+// Message Handlers - System (OS-Level) Tools
+// =============================================================================
+
+import {
+  takeScreenshot as sysScreenshot,
+  pressKey,
+  typeText,
+  mouseClick,
+  mouseMove,
+  mouseDrag,
+  listWindows,
+  focusWindow,
+  findWindowByName,
+} from './system-tools.js';
+
+bridge.on('system.screenshot', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const opts = (payload || {}) as { output?: string; base64?: boolean };
+
+  try {
+    const result = await sysScreenshot({ output: opts.output });
+    const response: any = { path: result.path, tool: result.tool, size: 0 };
+
+    // Get file size
+    try {
+      const file = Bun.file(result.path);
+      response.size = file.size;
+    } catch {}
+
+    if (opts.base64) {
+      response.base64 = result.base64;
+    }
+
+    bridge.sendTo(replyTo, 'system.screenshot.done', response, id);
+    logger.info(`OS screenshot taken: ${result.path}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('OS screenshot failed:', { error });
+    bridge.sendTo(replyTo, 'system.screenshot.error', { error }, id);
+  }
+});
+
+bridge.on('system.keyboard.press', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { combo } = payload as { combo: string };
+
+  try {
+    // Parse combo like "ctrl+b" into key and modifiers
+    const parts = combo.split('+');
+    const key = parts.pop()!;
+    const modifiers = parts;
+    await pressKey(key, modifiers);
+    bridge.sendTo(replyTo, 'system.keyboard.done', { pressed: true, combo }, id);
+    logger.info(`OS key pressed: ${combo}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.keyboard.error', { error }, id);
+  }
+});
+
+bridge.on('system.keyboard.type', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { text, delay } = payload as { text: string; delay?: number };
+
+  try {
+    await typeText(text, delay || 0);
+    bridge.sendTo(replyTo, 'system.keyboard.done', { typed: true, length: text.length }, id);
+    logger.info(`OS text typed: ${text.length} chars`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.keyboard.error', { error }, id);
+  }
+});
+
+bridge.on('system.mouse.click', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { x, y, button, clicks } = payload as { x: number; y: number; button?: string; clicks?: number };
+
+  try {
+    await mouseClick({
+      x, y,
+      button: (button as 'left' | 'right' | 'middle') || 'left',
+      clicks: clicks || 1,
+    });
+    bridge.sendTo(replyTo, 'system.mouse.done', { clicked: true, x, y }, id);
+    logger.info(`OS mouse click at ${x},${y}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.mouse.error', { error }, id);
+  }
+});
+
+bridge.on('system.mouse.move', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { x, y } = payload as { x: number; y: number };
+
+  try {
+    await mouseMove({ x, y });
+    bridge.sendTo(replyTo, 'system.mouse.done', { moved: true, x, y }, id);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.mouse.error', { error }, id);
+  }
+});
+
+bridge.on('system.mouse.drag', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { fromX, fromY, toX, toY, button } = payload as {
+    fromX: number; fromY: number; toX: number; toY: number; button?: string;
+  };
+
+  try {
+    await mouseDrag(fromX, fromY, toX, toY, (button as 'left' | 'right' | 'middle') || 'left');
+    bridge.sendTo(replyTo, 'system.mouse.done', { dragged: true, from: { x: fromX, y: fromY }, to: { x: toX, y: toY } }, id);
+    logger.info(`OS mouse drag from ${fromX},${fromY} to ${toX},${toY}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.mouse.error', { error }, id);
+  }
+});
+
+bridge.on('system.window.list', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+
+  try {
+    const windows = await listWindows();
+    bridge.sendTo(replyTo, 'system.window.done', { windows, count: windows.length }, id);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.window.error', { error }, id);
+  }
+});
+
+bridge.on('system.window.focus', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { name, id: windowId } = payload as { name?: string; id?: string };
+
+  try {
+    let targetId = windowId;
+    if (!targetId && name) {
+      targetId = await findWindowByName(name) || undefined;
+    }
+    if (!targetId) {
+      throw new Error(`Window not found: ${name || windowId}`);
+    }
+    await focusWindow(targetId);
+    bridge.sendTo(replyTo, 'system.window.done', { focused: true, windowId: targetId }, id);
+    logger.info(`OS window focused: ${targetId}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'system.window.error', { error }, id);
   }
 });
 

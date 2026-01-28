@@ -344,7 +344,7 @@ const TOOLS: Tool[] = [
   // Direct browser control (passthrough to Frankenstein)
   {
     name: 'frank_browser_launch',
-    description: 'Launch a browser instance',
+    description: 'Launch a browser instance. Supports loading Chrome extensions for testing sidebars, popups, and extension UIs.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -356,6 +356,11 @@ const TOOLS: Tool[] = [
         url: {
           type: 'string',
           description: 'Optional URL to navigate to after launch',
+        },
+        extensions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of absolute paths to unpacked Chrome extensions to load. Extensions will be available via chrome.sidePanel, chrome.action, etc.',
         },
       },
     },
@@ -443,6 +448,110 @@ const TOOLS: Tool[] = [
         },
       },
       required: ['reason'],
+    },
+  },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OS-LEVEL TOOLS - Desktop automation beyond the DOM
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'frank_os_screenshot',
+    description: 'Take an OS-level screenshot of the entire desktop. Captures EVERYTHING visible: browser chrome, sidebars, extension panels, system dialogs, notifications. Use this instead of frank_screenshot when testing things outside the DOM.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        output: {
+          type: 'string',
+          description: 'Output file path (default: /tmp/frank_desktop_<timestamp>.png)',
+        },
+        base64: {
+          type: 'boolean',
+          description: 'Also return base64-encoded image data (default: false)',
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: 'frank_os_keyboard',
+    description: 'Send keyboard input at the OS level. Works in any focused window - browser, sidebar, extension popup, system dialog. For key combos use the combo parameter (e.g., "ctrl+b" for sidebar). For typing text use the text parameter.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        combo: {
+          type: 'string',
+          description: 'Key combination to press (e.g., "ctrl+b", "ctrl+shift+i", "Escape", "Tab", "F12", "Return")',
+        },
+        text: {
+          type: 'string',
+          description: 'Text to type (alternative to combo - types each character)',
+        },
+        delay: {
+          type: 'number',
+          description: 'Delay between keystrokes in ms when typing text (default: 0)',
+          default: 0,
+        },
+      },
+    },
+  },
+  {
+    name: 'frank_os_mouse',
+    description: 'Click, move, or drag the mouse at OS-level coordinates. Works on browser chrome, extension icons, sidebar edges, system UI. For clicking extension icons, sidebar toggles, or anything outside the DOM.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['click', 'move', 'drag'],
+          description: 'Mouse action to perform',
+        },
+        x: {
+          type: 'number',
+          description: 'X coordinate (for click and move)',
+        },
+        y: {
+          type: 'number',
+          description: 'Y coordinate (for click and move)',
+        },
+        button: {
+          type: 'string',
+          enum: ['left', 'right', 'middle'],
+          description: 'Mouse button (default: left)',
+          default: 'left',
+        },
+        clicks: {
+          type: 'number',
+          description: 'Number of clicks (default: 1, use 2 for double-click)',
+          default: 1,
+        },
+        fromX: { type: 'number', description: 'Drag start X (for drag action)' },
+        fromY: { type: 'number', description: 'Drag start Y (for drag action)' },
+        toX: { type: 'number', description: 'Drag end X (for drag action)' },
+        toY: { type: 'number', description: 'Drag end Y (for drag action)' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'frank_os_window',
+    description: 'List, focus, or find OS windows. Use to switch focus to Chrome, find sidebar windows, or manage window layout.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list', 'focus'],
+          description: 'Window action to perform',
+        },
+        name: {
+          type: 'string',
+          description: 'Window name to focus (partial match, e.g., "Chrome", "Firefox")',
+        },
+        id: {
+          type: 'string',
+          description: 'Window ID to focus (from list action)',
+        },
+      },
+      required: ['action'],
     },
   },
   // Dynamic tools
@@ -685,6 +794,7 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       return bridge.request('frankenstein', 'browser.launch', {
         headless: args.headless || false,
         url: args.url,
+        extensions: args.extensions,  // Pass extension paths through
       });
 
     case 'frank_browser_navigate':
@@ -712,6 +822,69 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 
     case 'frank_lightning_strike':
       return bridge.request('igor', 'lightning.strike', { reason: args.reason });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OS-LEVEL TOOL HANDLERS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    case 'frank_os_screenshot':
+      return bridge.request('frankenstein', 'system.screenshot', {
+        output: args.output,
+        base64: args.base64 || false,
+      });
+
+    case 'frank_os_keyboard': {
+      if (args.combo) {
+        return bridge.request('frankenstein', 'system.keyboard.press', {
+          combo: args.combo,
+        });
+      } else if (args.text) {
+        return bridge.request('frankenstein', 'system.keyboard.type', {
+          text: args.text,
+          delay: args.delay || 0,
+        });
+      }
+      return { error: 'Provide either combo (key combination) or text (to type)' };
+    }
+
+    case 'frank_os_mouse': {
+      const action = args.action as string;
+      if (action === 'click') {
+        return bridge.request('frankenstein', 'system.mouse.click', {
+          x: args.x,
+          y: args.y,
+          button: args.button || 'left',
+          clicks: args.clicks || 1,
+        });
+      } else if (action === 'move') {
+        return bridge.request('frankenstein', 'system.mouse.move', {
+          x: args.x,
+          y: args.y,
+        });
+      } else if (action === 'drag') {
+        return bridge.request('frankenstein', 'system.mouse.drag', {
+          fromX: args.fromX,
+          fromY: args.fromY,
+          toX: args.toX,
+          toY: args.toY,
+          button: args.button || 'left',
+        });
+      }
+      return { error: `Unknown mouse action: ${action}` };
+    }
+
+    case 'frank_os_window': {
+      const windowAction = args.action as string;
+      if (windowAction === 'list') {
+        return bridge.request('frankenstein', 'system.window.list', {});
+      } else if (windowAction === 'focus') {
+        return bridge.request('frankenstein', 'system.window.focus', {
+          name: args.name,
+          id: args.id,
+        });
+      }
+      return { error: `Unknown window action: ${windowAction}` };
+    }
 
     case 'frank_tools_list':
       const frankStatus = await fetch('http://localhost:7003/health').then(r => r.json());
