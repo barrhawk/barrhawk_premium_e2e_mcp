@@ -22,6 +22,10 @@ export type ToolCategory =
   | 'backend_http'      // request, health_check
   | 'backend_test'      // run_tests, load_test
   | 'backend_session'   // create_session, set_variable
+  | 'backend_realtime'  // ws_connect, ws_send
+  | 'backend_schema'    // graphql_query, grpc_call
+  | 'backend_queue'     // queue_publish, queue_peek
+  | 'code_intelligence' // detective_analyze, bisect
   | 'assertions'        // assert_equals, assert_contains, assert_visible
   | 'ai_analysis'       // smart_assert, analyze_failure, suggest_fix
   | 'ai_generation'     // test_from_description, generate_tests_from_url
@@ -232,20 +236,59 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   // BACKEND HTTP
   // ─────────────────────────────────────────────────────────────────────────────
   {
-    name: 'backend_request',
-    description: 'Make an HTTP request',
+    name: 'api_request',
+    description: 'Make a robust HTTP request (GET, POST, etc.) with support for Auth, Headers, and Timeouts. Use this for direct API testing.',
     category: 'backend_http',
-    tags: ['http', 'api', 'request', 'get', 'post', 'put', 'delete', 'fetch'],
+    tags: ['http', 'api', 'request', 'get', 'post', 'put', 'delete', 'fetch', 'axios', 'backend'],
     weight: 100,
     inputSchema: {
       type: 'object',
       properties: {
-        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'] },
         url: { type: 'string' },
-        body: { type: 'object' },
-        headers: { type: 'object' },
+        headers: { type: 'object', description: 'Key-value pairs of headers' },
+        params: { type: 'object', description: 'Query parameters' },
+        body: { type: 'object', description: 'JSON body payload' },
+        auth: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['bearer', 'basic'] },
+            token: { type: 'string' },
+            username: { type: 'string' },
+            password: { type: 'string' },
+          },
+        },
+        timeout: { type: 'number', default: 10000 },
+        validateStatus: { type: 'boolean', default: true },
       },
       required: ['method', 'url'],
+    },
+  },
+  {
+    name: 'api_assert',
+    description: 'Assert properties of an API response (status, headers, body, timing). Supports JSONPath for body assertions.',
+    category: 'backend_http',
+    tags: ['api', 'assert', 'check', 'verify', 'status', 'json', 'body', 'header'],
+    weight: 95,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        response: { type: 'object', description: 'The response object from api_request' },
+        assertions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['status', 'header', 'body', 'time'] },
+              key: { type: 'string', description: 'Header name or JSONPath expression (e.g., "$.users[0].id")' },
+              operator: { type: 'string', enum: ['equals', 'contains', 'exists', 'lt', 'gt'] },
+              value: { description: 'Expected value' },
+            },
+            required: ['type', 'operator'],
+          },
+        },
+      },
+      required: ['response', 'assertions'],
     },
   },
   {
@@ -261,6 +304,260 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         expectedStatus: { type: 'number', default: 200 },
       },
       required: ['url'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SCRIBE (Documentation)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'scribe_generate_tutorial',
+    description: 'Generate a Markdown tutorial from a test execution trace.',
+    category: 'reporting',
+    tags: ['docs', 'tutorial', 'markdown', 'write', 'generate', 'guide'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        planId: { type: 'string' },
+        title: { type: 'string' },
+        outputFile: { type: 'string' },
+      },
+      required: ['planId', 'title'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TIME LORD (Database)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'db_snapshot',
+    description: 'Snapshot a database state (Docker container or Dump).',
+    category: 'backend_session',
+    tags: ['db', 'database', 'snapshot', 'save', 'backup', 'state'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'Container ID or Connection String' },
+        name: { type: 'string' },
+        type: { type: 'string', enum: ['docker', 'postgres'], default: 'docker' },
+      },
+      required: ['target', 'name'],
+    },
+  },
+  {
+    name: 'db_restore',
+    description: 'Restore a database from a snapshot.',
+    category: 'backend_session',
+    tags: ['db', 'database', 'restore', 'load', 'reset', 'state'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string' },
+        name: { type: 'string' },
+        type: { type: 'string', enum: ['docker', 'postgres'], default: 'docker' },
+      },
+      required: ['target', 'name'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CHAOS (Fuzzing)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'chaos_fuzz',
+    description: 'Inject chaos (random clicks/inputs) into the page.',
+    category: 'security',
+    tags: ['fuzz', 'chaos', 'random', 'stress', 'monkey', 'click'],
+    weight: 70,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        duration: { type: 'number', default: 60000 },
+        seed: { type: 'string' },
+      },
+      required: ['url'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLACK BOX (Session)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'session_pack',
+    description: 'Pack a test session into a .hawk file (Video + Logs + HAR).',
+    category: 'reporting',
+    tags: ['pack', 'zip', 'export', 'session', 'hawk', 'artifact'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        planId: { type: 'string' },
+        outputDir: { type: 'string' },
+      },
+      required: ['planId'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CODE INTELLIGENCE (Detective)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'detective_analyze_stack',
+    description: 'Analyze a stack trace to find the culprit file, line, and git commit.',
+    category: 'code_intelligence',
+    tags: ['debug', 'stack', 'trace', 'blame', 'git', 'error', 'analyze'],
+    weight: 95,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        error: { type: 'string', description: 'The error message or stack trace' },
+      },
+      required: ['error'],
+    },
+  },
+  {
+    name: 'detective_run_bisect',
+    description: 'Run automated git bisect to find which commit broke a test.',
+    category: 'code_intelligence',
+    tags: ['git', 'bisect', 'find', 'commit', 'broken', 'regression'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        testCommand: { type: 'string', description: 'Shell command to run the test (exit 0=pass, 1=fail)' },
+        goodCommit: { type: 'string', description: 'Hash of a known good commit' },
+        badCommit: { type: 'string', default: 'HEAD' },
+      },
+      required: ['testCommand', 'goodCommit'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BACKEND REAL-TIME (WebSockets)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'ws_connect',
+    description: 'Connect to a WebSocket server',
+    category: 'backend_realtime',
+    tags: ['ws', 'websocket', 'connect', 'realtime', 'socket'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'ws:// or wss:// URL' },
+        headers: { type: 'object' },
+        timeout: { type: 'number', default: 5000 },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'ws_send',
+    description: 'Send a message to a connected WebSocket',
+    category: 'backend_realtime',
+    tags: ['ws', 'send', 'message', 'emit', 'socket'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        message: { description: 'String or JSON object to send' },
+      },
+      required: ['connectionId', 'message'],
+    },
+  },
+  {
+    name: 'ws_wait_for_message',
+    description: 'Wait for a specific message on a WebSocket',
+    category: 'backend_realtime',
+    tags: ['ws', 'wait', 'listen', 'receive', 'socket'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        pattern: { description: 'String substring or JSON object to match' },
+        timeout: { type: 'number', default: 5000 },
+      },
+      required: ['connectionId', 'pattern'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BACKEND SCHEMA (GraphQL)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'graphql_query',
+    description: 'Execute a GraphQL query or mutation',
+    category: 'backend_schema',
+    tags: ['graphql', 'gql', 'query', 'mutation', 'schema'],
+    weight: 95,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        query: { type: 'string' },
+        variables: { type: 'object' },
+        headers: { type: 'object' },
+        auth: { type: 'string', description: 'Bearer token' },
+      },
+      required: ['url', 'query'],
+    },
+  },
+  {
+    name: 'graphql_introspect',
+    description: 'Introspect a GraphQL schema to find available types',
+    category: 'backend_schema',
+    tags: ['graphql', 'schema', 'types', 'introspect', 'discover'],
+    weight: 70,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        auth: { type: 'string' },
+      },
+      required: ['url'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BACKEND EVENTS (Queue/Kafka)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'queue_publish',
+    description: 'Publish a message to a queue/topic (Kafka/AMQP/Memory)',
+    category: 'backend_queue',
+    tags: ['queue', 'kafka', 'rabbit', 'publish', 'send', 'event'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', enum: ['memory', 'kafka', 'amqp'], default: 'memory' },
+        topic: { type: 'string' },
+        message: { description: 'Payload' },
+        connectionString: { type: 'string', description: 'Required for kafka/amqp' },
+      },
+      required: ['topic', 'message'],
+    },
+  },
+  {
+    name: 'queue_peek',
+    description: 'Peek at messages on a queue/topic',
+    category: 'backend_queue',
+    tags: ['queue', 'kafka', 'read', 'listen', 'check', 'event'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', enum: ['memory', 'kafka', 'amqp'], default: 'memory' },
+        topic: { type: 'string' },
+        count: { type: 'number', default: 1 },
+      },
+      required: ['topic'],
     },
   },
 
@@ -671,11 +968,77 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       required: ['results'],
     },
   },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MCP TESTING (META-VERIFICATION)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'mcp_connect',
+    description: 'Connect to an external MCP server (Stdio or SSE). Returns a Connection ID.',
+    category: 'mcp_testing',
+    tags: ['mcp', 'connect', 'server', 'agent', 'attach'],
+    weight: 100,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Unique ID for this connection' },
+        type: { type: 'string', enum: ['stdio', 'sse'] },
+        command: { type: 'string', description: 'Command to run (for stdio)' },
+        args: { type: 'array', items: { type: 'string' }, description: 'Arguments (for stdio)' },
+        url: { type: 'string', description: 'URL (for sse)' },
+        env: { type: 'object', description: 'Environment variables' },
+      },
+      required: ['id', 'type'],
+    },
+  },
+  {
+    name: 'mcp_list_tools',
+    description: 'List available tools on a connected MCP server.',
+    category: 'mcp_testing',
+    tags: ['mcp', 'list', 'tools', 'capabilities', 'discovery'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+      },
+      required: ['connectionId'],
+    },
+  },
+  {
+    name: 'mcp_call_tool',
+    description: 'Call a tool on a connected MCP server.',
+    category: 'mcp_testing',
+    tags: ['mcp', 'call', 'invoke', 'execute', 'run'],
+    weight: 95,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        toolName: { type: 'string' },
+        arguments: { type: 'object' },
+      },
+      required: ['connectionId', 'toolName'],
+    },
+  },
+  {
+    name: 'mcp_read_resource',
+    description: 'Read a resource from a connected MCP server.',
+    category: 'mcp_testing',
+    tags: ['mcp', 'read', 'resource', 'file', 'data'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        uri: { type: 'string' },
+      },
+      required: ['connectionId', 'uri'],
+    },
+  },
 ];
 
 // =============================================================================
 // Category Metadata
-// =============================================================================
 
 export const CATEGORY_INFO: Record<ToolCategory, {
   name: string;
@@ -716,6 +1079,26 @@ export const CATEGORY_INFO: Record<ToolCategory, {
     name: 'Backend Sessions',
     description: 'Session and variable management',
     keywords: ['session', 'variable', 'state', 'auth'],
+  },
+  backend_realtime: {
+    name: 'Real-Time',
+    description: 'WebSocket and persistent connections',
+    keywords: ['websocket', 'socket', 'realtime', 'live', 'stream'],
+  },
+  backend_schema: {
+    name: 'Schema APIs',
+    description: 'GraphQL and gRPC endpoints',
+    keywords: ['graphql', 'gql', 'schema', 'type', 'grpc'],
+  },
+  backend_queue: {
+    name: 'Message Queues',
+    description: 'Event-driven verification (Kafka/RabbitMQ)',
+    keywords: ['queue', 'kafka', 'rabbit', 'event', 'message', 'broker'],
+  },
+  code_intelligence: {
+    name: 'Code Intelligence',
+    description: 'Source code analysis and git forensics',
+    keywords: ['git', 'blame', 'code', 'source', 'stack', 'debug', 'bisect'],
   },
   assertions: {
     name: 'Assertions',

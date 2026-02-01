@@ -117,6 +117,8 @@ class BridgeConnection {
   private requestTimeout = 60000; // 60s for complex operations
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  
+  public onToolToggle?: (enabled: boolean) => void;
 
   async connect(): Promise<boolean> {
     // Clear any existing heartbeat
@@ -220,6 +222,15 @@ class BridgeConnection {
   }
 
   private handleMessage(message: BridgeMessage): void {
+    // Handle tool toggle
+    if (message.type === 'mcp.toggle_tools') {
+      const payload = message.payload as { enabled: boolean };
+      if (this.onToolToggle) {
+        this.onToolToggle(payload.enabled);
+      }
+      return;
+    }
+
     // Check if this is a response to a pending request
     if (message.correlationId && this.pendingRequests.has(message.correlationId)) {
       const pending = this.pendingRequests.get(message.correlationId)!;
@@ -758,6 +769,28 @@ const TOOLS: Tool[] = [
 ];
 
 // =============================================================================
+// Tool Masking (Context Bloat Reduction)
+// =============================================================================
+
+let toolsEnabled = true;
+
+const WAKE_UP_TOOL: Tool = {
+  name: 'frank_wake_up',
+  description: 'Wake up the BarrHawk tools. Use this if you need to perform testing actions but the tools are currently hibernating to save context.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+function getVisibleTools(): Tool[] {
+  if (toolsEnabled) {
+    return TOOLS;
+  }
+  return [WAKE_UP_TOOL];
+}
+
+// =============================================================================
 // Tool Handlers
 // =============================================================================
 
@@ -772,7 +805,16 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
     }
   }
 
+  // If tools are disabled, only allow wake up
+  if (!toolsEnabled && name !== 'frank_wake_up') {
+    return { error: 'Tools are hibernating. Call frank_wake_up to enable them.' };
+  }
+
   switch (name) {
+    case 'frank_wake_up':
+      // This is handled in the request handler, but good to have here for completeness
+      return { success: true, message: 'Tools woken up' };
+
     case 'frank_execute':
       return bridge.request('doctor', 'plan.execute', {
         intent: args.task,
@@ -1112,17 +1154,64 @@ ${dashboardReported ? `View live progress: ${DASHBOARD_URL}` : 'Dashboard not av
 
 const server = new Server(
   { name: 'barrhawk-frank', version: VERSION },
-  { capabilities: { tools: {} } }
+  {
+    capabilities: {
+      tools: {
+        listChanged: true
+      }
+    }
+  }
 );
+
+// Hook up bridge toggle
+bridge.onToolToggle = (enabled: boolean) => {
+  toolsEnabled = enabled;
+  console.error(`[MCP-Frank] Tools toggled: ${enabled ? 'ENABLED' : 'DISABLED'}`);
+  
+  // Notify client
+  try {
+    // @ts-ignore - Accessing internal transport to send notification
+    if (server.transport) {
+      // @ts-ignore
+      server.transport.send({
+        jsonrpc: '2.0',
+        method: 'notifications/tools/list_changed',
+      });
+    }
+  } catch (err) {
+    console.error('[MCP-Frank] Failed to send list_changed notification:', err);
+  }
+};
 
 // List tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: TOOLS };
+  return { tools: getVisibleTools() };
 });
 
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  // Handle special wake up tool
+  if (name === 'frank_wake_up') {
+    toolsEnabled = true;
+    // Notify client
+    try {
+      // @ts-ignore
+      if (server.transport) {
+        // @ts-ignore
+        server.transport.send({
+          jsonrpc: '2.0',
+          method: 'notifications/tools/list_changed',
+        });
+      }
+    } catch (err) {
+      console.error('[MCP-Frank] Failed to send list_changed notification:', err);
+    }
+    return {
+      content: [{ type: 'text', text: 'BarrHawk tools have been woken up. You should now see the full toolset available.' }]
+    };
+  }
 
   try {
     const result = await handleTool(name, args as Record<string, unknown>);

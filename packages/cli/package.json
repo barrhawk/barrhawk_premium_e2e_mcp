@@ -1,0 +1,23 @@
+{
+  "name": "@barrhawk/cli",
+  "version": "0.3.1",
+  "bin": {
+    "barrhawk": "./dist/index.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "commander": "^11.0.0",
+    "inquirer": "^9.0.0",
+    "chalk": "^5.0.0",
+    "conf": "^12.0.0",
+    "execa": "^8.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@barrhawk/detective",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "type": "module",
+  "dependencies": {
+    "execa": "^8.0.0",
+    "stacktrace-parser": "^0.1.10"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
