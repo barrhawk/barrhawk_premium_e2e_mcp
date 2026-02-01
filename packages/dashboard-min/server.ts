@@ -203,6 +203,14 @@ const HTML = `<!DOCTYPE html>
     .dot.on { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,0.5); }
     .dot.off { background: var(--muted); opacity: 0.5; }
 
+    /* Toggle Switch */
+    .toggle-wrapper { display: flex; align-items: center; gap: 8px; margin-left: 20px; }
+    .toggle-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+    .toggle { position: relative; width: 36px; height: 20px; background: var(--border); border-radius: 20px; cursor: pointer; transition: background 0.3s; }
+    .toggle.active { background: var(--green); }
+    .toggle-handle { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1); }
+    .toggle.active .toggle-handle { transform: translateX(16px); }
+    
     /* Main panel */
     .main { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
     .browser-panel { flex: 1; background: #000; position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; }
@@ -355,6 +363,12 @@ const HTML = `<!DOCTYPE html>
         BarrHawk War Room
       </div>
       <div class="status-row">
+        <div class="toggle-wrapper" title="Token Nuke: Turn off to save context tokens (Hollow Shell mode)">
+          <div class="toggle-label">Tools</div>
+          <div class="toggle active" id="tools-toggle" onclick="toggleTools()">
+            <div class="toggle-handle"></div>
+          </div>
+        </div>
         <div class="status-dot"><div class="dot" id="s-bridge"></div>Bridge</div>
         <div class="status-dot"><div class="dot" id="s-doctor"></div>Doctor</div>
         <div class="status-dot"><div class="dot" id="s-igor"></div>Igor</div>
@@ -713,6 +727,28 @@ function loadScreenshot(path) { if (path) fetchScreenshot(); }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
+let toolsEnabled = true;
+async function toggleTools() {
+  toolsEnabled = !toolsEnabled;
+  const el = document.getElementById('tools-toggle');
+  el.className = 'toggle ' + (toolsEnabled ? 'active' : '');
+  
+  try {
+    await fetch('/api/toggle-tools', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: toolsEnabled })
+    });
+    // Add local event for immediate feedback
+    addEvent({ type: 'tools.toggled', time: Date.now(), payload: { enabled: toolsEnabled } });
+  } catch (err) {
+    console.error('Failed to toggle tools', err);
+    // Revert UI on error
+    toolsEnabled = !toolsEnabled;
+    el.className = 'toggle ' + (toolsEnabled ? 'active' : '');
+  }
+}
+
 document.getElementById('cmd-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitIntent(); });
 
 connect();
@@ -744,6 +780,27 @@ Bun.serve({
         });
         const data = await res.json();
         return Response.json(data);
+      } catch (err: any) {
+        return Response.json({ error: err.message }, { status: 500 });
+      }
+    }
+
+    // API: Toggle Tools (Token Nuke)
+    if (url.pathname === '/api/toggle-tools' && req.method === 'POST') {
+      try {
+        const body = await req.json();
+        const enabled = !!body.enabled;
+        
+        if (bridgeWs && bridgeWs.readyState === WebSocket.OPEN) {
+          bridgeWs.send(JSON.stringify({
+            type: 'mcp.toggle_tools',
+            source: 'dashboard',
+            payload: { enabled }
+          }));
+          return Response.json({ success: true, enabled });
+        } else {
+          return Response.json({ error: 'Bridge not connected' }, { status: 503 });
+        }
       } catch (err: any) {
         return Response.json({ error: err.message }, { status: 500 });
       }
