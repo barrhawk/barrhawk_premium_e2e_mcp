@@ -28,6 +28,9 @@ export type ToolCategory =
   | 'backend_mock'      // mock_server, mock_route
   | 'mobile'            // mobile_launch, mobile_tap
   | 'cli'               // cli_run
+  | 'psych_ward'        // psych_ward_prompt
+  | 'ai_critic'         // critic_review
+  | 'ai_genesis'        // genesis_fix
   | 'code_intelligence' // detective_analyze, bisect
   | 'assertions'        // assert_equals, assert_contains, assert_visible
   | 'ai_analysis'       // smart_assert, analyze_failure, suggest_fix
@@ -436,6 +439,63 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         badCommit: { type: 'string', default: 'HEAD' },
       },
       required: ['testCommand', 'goodCommit'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // THE PSYCH WARD (Personas)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'psych_ward_prompt',
+    description: 'Get the system prompt for a specific user persona (boomer, zoomer, hacker, drunk).',
+    category: 'psych_ward',
+    tags: ['persona', 'roleplay', 'simulate', 'user', 'psych', 'behavior'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        persona: { type: 'string', enum: ['boomer', 'zoomer', 'hacker', 'drunk'] },
+      },
+      required: ['persona'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // THE ART CRITIC (Visual Design)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'critic_review',
+    description: 'AI Visual Design Review of a screenshot. Returns score, issues, and praise.',
+    category: 'ai_critic',
+    tags: ['design', 'ui', 'ux', 'review', 'critique', 'visual', 'style'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        screenshotBase64: { type: 'string' },
+        context: { type: 'string', description: 'What are we looking at?' },
+      },
+      required: ['screenshotBase64'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PROJECT GENESIS (Self-Healing Code)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'genesis_fix',
+    description: 'Attempt to fix a source file to pass a failing test command.',
+    category: 'ai_genesis',
+    tags: ['fix', 'code', 'repair', 'heal', 'tdd', 'auto', 'genesis'],
+    weight: 100,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        testCommand: { type: 'string' },
+        targetFile: { type: 'string' },
+        maxAttempts: { type: 'number', default: 3 },
+      },
+      required: ['testCommand', 'targetFile'],
     },
   },
 
@@ -1276,6 +1336,21 @@ export const CATEGORY_INFO: Record<ToolCategory, {
     name: 'CLI',
     description: 'Command line tool verification',
     keywords: ['cli', 'terminal', 'shell', 'command', 'bash'],
+  },
+  psych_ward: {
+    name: 'The Psych Ward',
+    description: 'Persona-based user simulation',
+    keywords: ['persona', 'user', 'simulate', 'behavior', 'role'],
+  },
+  ai_critic: {
+    name: 'The Art Critic',
+    description: 'AI visual design and UX review',
+    keywords: ['design', 'ui', 'ux', 'visual', 'review'],
+  },
+  ai_genesis: {
+    name: 'Project Genesis',
+    description: 'Self-healing code generation loops',
+    keywords: ['fix', 'repair', 'code', 'generate', 'tdd'],
   },
   code_intelligence: {
     name: 'Code Intelligence',

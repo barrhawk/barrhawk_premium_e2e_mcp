@@ -1,0 +1,9 @@
+{
+  "name": "@barrhawk/genesis",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "type": "module",
+  "dependencies": {
+    "execa": "^8.0.0"
+  }
+}
