@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#00d26a">
+  <title>Page Beta - Hell Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0d1f0d, #1a3a1a);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+    .container {
+      max-width: 600px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      background: #00d26a;
+      color: #000;
+      padding: 8px 24px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-size: 48px;
+      margin-bottom: 16px;
+      background: linear-gradient(90deg, #00d26a, #00ff88);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #888;
+      margin-bottom: 32px;
+    }
+    .data-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .data-row:last-child { border-bottom: none; }
+    .data-label { color: #888; }
+    .data-value { color: #00d26a; font-weight: bold; }
+    .action-btn {
+      background: #00d26a;
+      color: #000;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin: 8px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .action-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(0, 210, 106, 0.4);
+    }
+    .action-btn.secondary {
+      background: transparent;
+      border: 2px solid #00d26a;
+      color: #00d26a;
+    }
+    .slow-loader {
+      margin: 24px 0;
+      padding: 16px;
+      background: rgba(0,210,106,0.1);
+      border-radius: 8px;
+    }
+    .slow-loader.loading {
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .timestamp { font-size: 12px; color: #666; margin-top: 24px; }
+  </style>
+</head>
+<body
+  data-hell-page-id="BETA"
+  data-hell-theme-color="#00d26a"
+  data-hell-custom-data="This is Page Beta - The Green Zone"
+>
+  <div class="container">
+    <div class="badge">TEST PAGE B</div>
+    <h1>Page Beta</h1>
+    <p class="subtitle">The sidebar should show "BETA" when this tab is active</p>
+
+    <div class="data-card">
+      <div class="data-row">
+        <span class="data-label">Page ID</span>
+        <span class="data-value" id="page-id">BETA</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Theme Color</span>
+        <span class="data-value">#00d26a (Green)</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Domain</span>
+        <span class="data-value" id="domain">localhost:6661</span>
+      </div>
+    </div>
+
+    <div class="slow-loader" id="slow-loader">
+      <span id="loader-text">Click to simulate slow network response</span>
+    </div>
+
+    <div>
+      <button class="action-btn" onclick="simulateSlowLoad()">Simulate 3s Load</button>
+      <button class="action-btn secondary" onclick="triggerUpdate()">Force Sidebar Update</button>
+    </div>
+
+    <p class="timestamp">Loaded at: <span id="timestamp"></span></p>
+  </div>
+
+  <script>
+    // Set domain dynamically
+    document.getElementById('domain').textContent = window.location.host;
+    document.getElementById('timestamp').textContent = new Date().toISOString();
+
+    function simulateSlowLoad() {
+      const loader = document.getElementById('slow-loader');
+      const text = document.getElementById('loader-text');
+
+      loader.classList.add('loading');
+      text.textContent = 'Loading... (switch tabs NOW to test race condition)';
+
+      setTimeout(() => {
+        loader.classList.remove('loading');
+        text.textContent = 'Load complete! Sidebar should still show correct tab.';
+
+        // Update data after delay
+        document.body.setAttribute('data-hell-custom-data',
+          `Page Beta - Slow load completed at ${new Date().toLocaleTimeString()}`);
+        triggerUpdate();
+      }, 3000);
+    }
+
+    function triggerUpdate() {
+      if (window.__hellExtensionUpdate) {
+        window.__hellExtensionUpdate();
+        console.log('[Page B] Triggered sidebar update');
+      }
+    }
+  </script>
+</body>
+</html>

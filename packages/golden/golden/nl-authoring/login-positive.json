@@ -1,0 +1,27 @@
+{
+  "id": "login-positive",
+  "name": "Login with correct credentials",
+  "description": "Test that NL authoring correctly generates a positive login test",
+  "suite": "nl-authoring",
+  "input": {
+    "tool": "test_from_description",
+    "args": {
+      "description": "test that correct password shows success message",
+      "baseUrl": "http://localhost:4444/fixture/login"
+    }
+  },
+  "expected": {
+    "steps": [
+      { "action": "navigate|go", "target": "login", "required": true },
+      { "action": "type|fill", "target": "email|username", "required": true },
+      { "action": "type|fill", "target": "password", "required": true },
+      { "action": "click", "target": "submit|sign.?in|login", "required": true },
+      { "action": "assert|expect|wait", "target": "success|welcome", "required": true }
+    ],
+    "mustContain": ["email", "password", "submit"],
+    "mustNotContain": ["error"]
+  },
+  "matchMode": "contains",
+  "threshold": 0.8,
+  "tags": ["login", "positive", "auth"]
+}

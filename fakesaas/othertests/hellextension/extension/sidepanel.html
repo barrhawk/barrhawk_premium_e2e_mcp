@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hell Extension Sidebar</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #e94560, #0f3460);
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header .subtitle {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .status-badge.synced { background: #00d26a; color: #000; }
+    .status-badge.loading { background: #ffc107; color: #000; }
+    .status-badge.error { background: #e94560; color: #fff; }
+    .status-badge.zombie { background: #9c27b0; color: #fff; }
+
+    .card {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid #0f3460;
+    }
+
+    .card h2 {
+      font-size: 14px;
+      color: #e94560;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #0f3460;
+      font-size: 13px;
+    }
+
+    .data-row:last-child {
+      border-bottom: none;
+    }
+
+    .data-label {
+      color: #888;
+    }
+
+    .data-value {
+      color: #fff;
+      word-break: break-all;
+      max-width: 200px;
+      text-align: right;
+    }
+
+    .data-value.highlight {
+      color: #00d26a;
+      font-weight: bold;
+    }
+
+    .note-input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #fff;
+      font-size: 14px;
+      margin-top: 8px;
+      resize: vertical;
+      min-height: 60px;
+    }
+
+    .note-input:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    .chaos-controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .chaos-btn {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .chaos-btn.active {
+      background: #e94560;
+      color: #fff;
+    }
+
+    .chaos-btn:not(.active) {
+      background: #0f3460;
+      color: #888;
+    }
+
+    .chaos-btn:hover {
+      transform: scale(1.02);
+    }
+
+    .action-btn {
+      background: #e94560;
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      background: #ff6b6b;
+      transform: scale(1.02);
+    }
+
+    .action-btn:disabled {
+      background: #444;
+      cursor: not-allowed;
+    }
+
+    .log-area {
+      background: #0a0a15;
+      border-radius: 6px;
+      padding: 10px;
+      font-family: 'Fira Code', 'Consolas', monospace;
+      font-size: 11px;
+      max-height: 150px;
+      overflow-y: auto;
+      margin-top: 8px;
+    }
+
+    .log-entry {
+      padding: 2px 0;
+      border-bottom: 1px solid #1a1a2e;
+    }
+
+    .log-entry.info { color: #00d26a; }
+    .log-entry.warn { color: #ffc107; }
+    .log-entry.error { color: #e94560; }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    #update-flash {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: #00d26a;
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 0.3s ease-out;
+    }
+
+    #update-flash.active {
+      transform: scaleX(1);
+    }
+  </style>
+</head>
+<body>
+  <div id="update-flash"></div>
+
+  <div class="header">
+    <h1>
+      <span>Hell Extension</span>
+      <span id="status-badge" class="status-badge loading">Loading</span>
+    </h1>
+    <div class="subtitle">State Sync Nightmare Tester</div>
+  </div>
+
+  <div id="content">
+    <div class="empty-state">
+      <div class="icon">👻</div>
+      <div>Waiting for tab data...</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>👤 API User</h2>
+    <div class="data-row">
+      <span class="data-label">Name</span>
+      <span class="data-value" id="user-name">Loading...</span>
+    </div>
+    <div class="data-row">
+      <span class="data-label">Plan</span>
+      <span class="data-value highlight" id="user-plan">-</span>
+    </div>
+    <div class="data-row">
+      <span class="data-label">API Status</span>
+      <span class="data-value" id="api-status">Checking...</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>❤️ Page Likes</h2>
+    <div class="data-row">
+      <span class="data-label">Likes for this page</span>
+      <span class="data-value highlight" id="like-count">0</span>
+    </div>
+    <button class="action-btn" id="btn-like" style="width: 100%; margin-top: 8px;">
+      ❤️ Like This Page
+    </button>
+  </div>
+
+  <div class="card">
+    <h2>📝 Tab-Specific Note</h2>
+    <div class="data-row">
+      <span class="data-label">Synced to API (test persistence)</span>
+    </div>
+    <textarea
+      id="tab-note"
+      class="note-input"
+      placeholder="Type something here, switch tabs, come back..."
+    ></textarea>
+  </div>
+
+  <div class="card">
+    <h2>🔥 Local Chaos (Extension)</h2>
+    <div class="chaos-controls">
+      <button id="btn-slow" class="chaos-btn">Slow Updates</button>
+      <button id="btn-zombie" class="chaos-btn">Zombie Mode</button>
+      <button id="btn-delay" class="chaos-btn">Network Delay</button>
+      <button id="btn-fail" class="chaos-btn">Random Fails</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🌐 Server Chaos (API)</h2>
+    <div class="chaos-controls">
+      <button id="btn-api-delay" class="chaos-btn">API Delay 2s</button>
+      <button id="btn-api-fail" class="chaos-btn">30% Failures</button>
+    </div>
+    <div class="data-row" style="margin-top: 8px;">
+      <span class="data-label">Server chaos</span>
+      <span class="data-value" id="server-chaos-status">Inactive</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📊 Event Log</h2>
+    <div id="log-area" class="log-area">
+      <div class="log-entry info">[init] Sidebar loaded</div>
+    </div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

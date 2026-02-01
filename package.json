@@ -1,39 +1,75 @@
 {
-  "name": "barrhawk-premium-e2e",
-  "version": "0.3.1",
-  "description": "BarrHawk Premium E2E Testing - Self-healing MCP server with tripartite architecture",
-  "type": "module",
-  "main": "packages/supervisor/index.ts",
-  "scripts": {
-    "beta": "bun run packages/supervisor/primary/index.ts",
-    "beta:secondary": "bun --hot run packages/supervisor/secondary/index.ts",
-    "beta:test": "bun run packages/supervisor/scripts/test-beta.ts",
-    "mcp:test": "bun run packages/supervisor/scripts/test-mcp.ts",
-    "test": "bun run beta:test && bun run mcp:test",
-    "tripartite": "cd tripartite && ./start.sh",
-    "tripartite:bridge": "bun run tripartite/bridge/index.ts",
-    "tripartite:doctor": "bun run tripartite/doctor/index.ts",
-    "tripartite:igor": "bun run tripartite/igor/index.ts",
-    "tripartite:frank": "bun run tripartite/frankenstein/index.ts",
-    "mcp:frank": "bun run tripartite/mcp-frank.ts",
-    "dashboard": "bun run packages/dashboard-min/server.ts"
-  },
-  "keywords": [
-    "mcp",
-    "e2e",
-    "testing",
-    "ai",
-    "self-healing",
-    "automation",
-    "tripartite",
-    "swarm"
-  ],
-  "author": "BarrHawk",
-  "license": "MIT",
-  "engines": {
-    "bun": ">=1.1.0"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
-  }
+    "name": "barrhawk-premium-e2e",
+    "version": "0.4.0",
+    "description": "BarrHawk E2E - Full SDLC MCP for Claude Code with browser automation, database, GitHub, Docker, and MCP orchestration",
+    "author": "BarrHawk",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/barrhawk/barrhawk_premium_e2e_mcp"
+    },
+    "type": "module",
+    "main": "dist/index.js",
+    "bin": {
+        "barrhawk-e2e": "./dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "build:bun": "bun build src/index.ts --outdir dist --target node",
+        "start": "node dist/index.js",
+        "dev": "tsc --watch",
+        "dev:bun": "bun --hot src/index.ts",
+        "test": "bun test",
+        "test:smoke": "bun test test/smoke.test.ts",
+        "typecheck": "tsc --noEmit",
+        "clean": "rm -rf dist",
+        "prepublishOnly": "npm run build",
+        "postinstall": "npx playwright install chromium || echo 'Run: npx playwright install chromium'"
+    },
+    "keywords": [
+        "mcp",
+        "claude",
+        "browser",
+        "automation",
+        "e2e",
+        "testing",
+        "playwright",
+        "self-healing",
+        "database",
+        "github",
+        "docker",
+        "orchestration"
+    ],
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.0",
+        "@octokit/rest": "^21.0.0",
+        "@types/ws": "^8.18.1",
+        "archiver": "^7.0.0",
+        "better-sqlite3": "^11.0.0",
+        "extract-zip": "^2.0.1",
+        "ioredis": "^5.9.2",
+        "pg": "^8.13.0",
+        "playwright": "^1.57.0",
+        "redis": "^4.7.0",
+        "uuid": "^13.0.0",
+        "ws": "^8.19.0"
+    },
+    "devDependencies": {
+        "@types/archiver": "^6.0.0",
+        "@types/better-sqlite3": "^7.6.0",
+        "@types/node": "^22.0.0",
+        "@types/pg": "^8.11.0",
+        "bun-types": "^1.0.0",
+        "typescript": "^5.6.0"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md",
+        "barrhawk.config.json"
+    ]
 }

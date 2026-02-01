@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BarrHawk Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <span class="brand-icon">B</span>
+        <span class="brand-text">BARRHAWK</span>
+      </div>
+      <div class="header-status">
+        <span id="connection-status" class="status-indicator disconnected">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting...</span>
+        </span>
+        <span id="igor-count" class="igor-badge">0 Igors</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-pause" class="btn btn-secondary" title="Pause (P)">
+          <span class="btn-icon">⏸</span> Pause
+        </button>
+        <button id="btn-command" class="btn btn-primary" title="Command Palette (⌘K)">
+          <span class="btn-icon">⌘</span> K
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="main-grid">
+      <!-- Bridge Panel -->
+      <section id="bridge-panel" class="panel bridge-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">
+            <span class="panel-icon bridge-icon">B</span>
+            BRIDGE
+          </h2>
+          <span id="bridge-status" class="status-badge">--</span>
+        </div>
+        <div class="panel-content">
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-label">Status</span>
+              <span id="bridge-state" class="stat-value">--</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Uptime</span>
+              <span id="bridge-uptime" class="stat-value">--</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Doctor</span>
+              <span id="bridge-doctor" class="stat-value">--</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Restarts</span>
+              <span id="bridge-restarts" class="stat-value">0</span>
+            </div>
+          </div>
+
+          <div class="throughput-section">
+            <h3 class="section-title">Throughput</h3>
+            <div class="throughput-stats">
+              <div class="throughput-item">
+                <span class="throughput-label">IN</span>
+                <span id="bridge-msg-in" class="throughput-value">0</span>
+                <span class="throughput-unit">msg</span>
+              </div>
+              <div class="throughput-item">
+                <span class="throughput-label">OUT</span>
+                <span id="bridge-msg-out" class="throughput-value">0</span>
+                <span class="throughput-unit">msg</span>
+              </div>
+            </div>
+            <div id="bridge-sparkline" class="sparkline"></div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn btn-danger btn-sm" data-action="doctor:restart">
+              Restart Doctor
+            </button>
+            <button class="btn btn-secondary btn-sm" data-action="bridge:pause">
+              Pause Traffic
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Doctor Panel -->
+      <section id="doctor-panel" class="panel doctor-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">
+            <span class="panel-icon doctor-icon">D</span>
+            DOCTOR
+          </h2>
+          <span id="doctor-status" class="status-badge">--</span>
+        </div>
+        <div class="panel-content">
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-label">Active Tasks</span>
+              <span id="doctor-active" class="stat-value stat-highlight">0</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Queued</span>
+              <span id="doctor-queued" class="stat-value">0</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Igors</span>
+              <span id="doctor-igors" class="stat-value">0/8</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Uptime</span>
+              <span id="doctor-uptime" class="stat-value">--</span>
+            </div>
+          </div>
+
+          <div class="swarms-section">
+            <h3 class="section-title">Active Swarms</h3>
+            <div id="swarms-list" class="swarms-list">
+              <div class="empty-state">No active swarms</div>
+            </div>
+          </div>
+
+          <div class="squads-section">
+            <h3 class="section-title">Squads</h3>
+            <div id="squads-list" class="squads-list">
+              <div class="empty-state">No squads</div>
+            </div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn btn-primary btn-sm" data-action="squad:create">
+              + New Squad
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Igors Panel -->
+      <section id="igors-panel" class="panel igors-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">
+            <span class="panel-icon igor-icon">I</span>
+            IGORS
+          </h2>
+          <button class="btn btn-primary btn-sm" data-action="igor:spawn">
+            + Spawn
+          </button>
+        </div>
+        <div class="panel-content">
+          <div id="igors-container" class="igors-container">
+            <div class="empty-state">No Igors running</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Frankenstream Panel -->
+      <section id="stream-panel" class="panel stream-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">
+            <span class="panel-icon stream-icon">F</span>
+            FRANKENSTREAM
+          </h2>
+          <div class="stream-controls">
+            <select id="stream-filter-source" class="filter-select">
+              <option value="all">All Sources</option>
+              <option value="bridge">Bridge</option>
+              <option value="doctor">Doctor</option>
+              <option value="igor">Igor</option>
+            </select>
+            <input type="text" id="stream-search" class="search-input" placeholder="Search...">
+            <button id="btn-autoscroll" class="btn btn-icon active" title="Auto-scroll">
+              <span>⏬</span>
+            </button>
+            <button id="btn-clear-stream" class="btn btn-icon" title="Clear">
+              <span>🗑</span>
+            </button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <div id="stream-container" class="stream-container">
+            <div class="stream-empty">Waiting for events...</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Command Palette -->
+    <div id="command-palette" class="cmd-palette hidden">
+      <div class="cmd-backdrop"></div>
+      <div class="cmd-modal">
+        <div class="cmd-header">
+          <span class="cmd-icon">🔍</span>
+          <input type="text" id="cmd-input" class="cmd-input" placeholder="Type a command..." autocomplete="off">
+          <span class="cmd-hint">ESC</span>
+        </div>
+        <div id="cmd-list" class="cmd-list"></div>
+      </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <h3 id="confirm-title" class="modal-title">Confirm Action</h3>
+        <p id="confirm-message" class="modal-message">Are you sure?</p>
+        <div class="modal-actions">
+          <button id="confirm-cancel" class="btn btn-secondary">Cancel</button>
+          <button id="confirm-ok" class="btn btn-danger">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="/assets/dashboard.js"></script>
+</body>
+</html>

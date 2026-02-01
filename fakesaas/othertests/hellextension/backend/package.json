@@ -1,0 +1,14 @@
+{
+  "name": "hellextension-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Hell Extension testing",
+  "main": "api.js",
+  "scripts": {
+    "start": "node api.js",
+    "dev": "node --watch api.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}

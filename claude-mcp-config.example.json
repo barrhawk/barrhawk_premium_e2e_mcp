@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "barrhawk": {
+      "command": "npx",
+      "args": ["barrhawk-e2e"]
+    }
+  }
+}

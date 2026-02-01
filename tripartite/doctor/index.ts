@@ -14,6 +14,8 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { spawn } from 'child_process';
+import path from 'path';
 import { BridgeClient } from '../shared/client.js';
 import { BridgeMessage, ComponentHealth, generateId } from '../shared/types.js';
 import { validateIntent, validatePlan, validateUrl, PlanStep as ValidatedPlanStep } from '../shared/validation.js';
@@ -24,7 +26,7 @@ import { selectToolsForIntent, ToolDefinition, ToolSelection } from '../shared/t
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
 // =============================================================================
-const DOCTOR_VERSION = '2026-01-25-v16-failure-create-flow';
+const DOCTOR_VERSION = '2026-01-30-v17-frank-restart-sync';
 
 // =============================================================================
 // Configuration
@@ -524,6 +526,173 @@ function generateToolCode(
           },
         },
       };
+  }
+}
+
+// =============================================================================
+// PHASE 2: Frank Tool Sync - Merge dynamic tools into Igor's tool bag
+// =============================================================================
+
+interface FrankDynamicTool {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  invocations: number;
+  successRate: number;
+}
+
+let frankDynamicTools: FrankDynamicTool[] = [];
+let frankToolsSyncedAt = 0;
+const FRANK_TOOLS_SYNC_INTERVAL = 30000; // Sync every 30 seconds
+
+/**
+ * Sync tools from Frankenstein
+ */
+async function syncToolsFromFrank(): Promise<void> {
+  try {
+    const response = await fetch('http://localhost:7003/tools');
+    if (!response.ok) {
+      logger.warn('Failed to fetch Frank tools', { status: response.status });
+      return;
+    }
+
+    const data = await response.json() as { tools: FrankDynamicTool[] };
+    frankDynamicTools = data.tools || [];
+    frankToolsSyncedAt = Date.now();
+
+    logger.info(`Synced ${frankDynamicTools.length} tools from Frank`, {
+      tools: frankDynamicTools.map(t => t.name),
+    });
+  } catch (err) {
+    logger.warn('Could not sync Frank tools', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Get Frank dynamic tools as ToolDefinitions for Igor
+ */
+function getFrankToolsForIgor(): Array<{ name: string; description: string; inputSchema: object }> {
+  return frankDynamicTools.map(t => ({
+    name: `frank_${t.name}`,
+    description: `[Frank Dynamic] ${t.description}`,
+    inputSchema: { type: 'object', properties: {} },
+  }));
+}
+
+// =============================================================================
+// PHASE 4: Frank Restart - Restart Frankenstein after tool creation
+// =============================================================================
+
+const FRANK_PATH = path.join(import.meta.dir, '../frankenstein/index.ts');
+const BUN_PATH = process.env.BUN_PATH || `${process.env.HOME}/.bun/bin/bun`;
+
+let isRestartingFrank = false;
+
+/**
+ * Wait for Frank to disconnect from Bridge
+ */
+async function waitForFrankDisconnect(timeout: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await fetch('http://localhost:7003/health');
+      if (!response.ok) {
+        return true; // Frank is down
+      }
+      const health = await response.json() as { bridgeConnected?: boolean };
+      if (!health.bridgeConnected) {
+        return true;
+      }
+    } catch {
+      return true; // Connection error = Frank is down
+    }
+    await sleep(100);
+  }
+  logger.warn('Frank did not disconnect in time');
+  return false;
+}
+
+/**
+ * Wait for Frank to reconnect
+ */
+async function waitForFrankConnect(timeout: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await fetch('http://localhost:7003/health');
+      if (response.ok) {
+        const health = await response.json() as { bridgeConnected?: boolean };
+        if (health.bridgeConnected) {
+          return true;
+        }
+      }
+    } catch {
+      // Not ready yet
+    }
+    await sleep(200);
+  }
+  return false;
+}
+
+/**
+ * Restart Frankenstein to load new tools
+ */
+async function restartFrank(reason: string): Promise<boolean> {
+  if (isRestartingFrank) {
+    logger.warn('Frank restart already in progress');
+    return false;
+  }
+
+  isRestartingFrank = true;
+  logger.info(`Restarting Frankenstein: ${reason}`);
+
+  try {
+    // Tell Frank to shutdown gracefully
+    bridge.sendTo('frankenstein', 'shutdown' as any, { reason });
+
+    // Wait for disconnect
+    await waitForFrankDisconnect(5000);
+
+    // Start new Frank process
+    logger.info(`Spawning new Frankenstein: ${BUN_PATH} run ${FRANK_PATH}`);
+
+    const frank = spawn(BUN_PATH, ['run', FRANK_PATH], {
+      detached: true,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}`,
+      },
+    });
+
+    frank.unref();
+
+    logger.info(`Frankenstein spawned with PID ${frank.pid}`);
+
+    // Wait for reconnect
+    const reconnected = await waitForFrankConnect(15000);
+
+    if (reconnected) {
+      logger.info('Frankenstein reconnected successfully');
+
+      // Resync tools from new instance
+      await syncToolsFromFrank();
+
+      return true;
+    } else {
+      logger.error('Frankenstein did not reconnect after restart');
+      return false;
+    }
+  } catch (err) {
+    logger.error('Failed to restart Frank', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  } finally {
+    isRestartingFrank = false;
   }
 }
 
@@ -1181,12 +1350,18 @@ async function submitBranchingPlan(branchingResult: BranchingPlanResult): Promis
     markIgorBusy(targetIgor.id, routePlan.id);
 
     // === TOOL BAG: Select relevant tools based on route intent ===
-    const routeToolSelection = selectToolsForIntent(routePlan.intent, 15);
-    const routeToolBag = routeToolSelection.tools.map(t => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    }));
+    // PHASE 2: Include both static tools and Frank dynamic tools
+    const routeToolSelection = selectToolsForIntent(routePlan.intent, 12);
+    const routeFrankTools = getFrankToolsForIgor();
+
+    const routeToolBag = [
+      ...routeToolSelection.tools.map(t => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      })),
+      ...routeFrankTools,  // Include Frank's dynamic tools
+    ];
 
     bridge.sendTo(targetIgor.id as any, 'plan.submit', {
       id: routePlan.id,
@@ -1194,7 +1369,7 @@ async function submitBranchingPlan(branchingResult: BranchingPlanResult): Promis
       route: routePlan.route,
       parentPlanId: routePlan.parentPlanId,
       toolBag: routeToolBag,
-      toolSelectionReasoning: routeToolSelection.reasoning,
+      toolSelectionReasoning: `${routeToolSelection.reasoning} + ${routeFrankTools.length} Frank tools`,
     });
 
     routeSubmissions.push({
@@ -1263,25 +1438,32 @@ async function submitPlan(plan: Plan): Promise<PlanSubmitResult | { error: strin
 
   // === TOOL BAG: Select relevant tools based on intent ===
   // This keeps Igor's context window lighter by only giving it the tools it needs
-  const toolSelection = selectToolsForIntent(plan.intent, 15);  // Max 15 tools
-  const toolBag = toolSelection.tools.map(t => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema,
-  }));
+  // PHASE 2: Include both static tools and Frank dynamic tools
+  const toolSelection = selectToolsForIntent(plan.intent, 12);  // Leave room for Frank tools
+  const frankTools = getFrankToolsForIgor();
 
-  logger.info(`🧰 Tool bag selected for plan ${plan.id}:`, {
+  const toolBag = [
+    ...toolSelection.tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    })),
+    ...frankTools,  // Include Frank's dynamic tools
+  ];
+
+  logger.info(`🧰 Tool bag for plan ${plan.id}: ${toolBag.length} tools (${toolSelection.tools.length} static + ${frankTools.length} Frank)`, {
     intent: plan.intent.substring(0, 50),
     toolCount: toolBag.length,
     categories: toolSelection.categories,
-    tools: toolBag.map(t => t.name),
+    staticTools: toolSelection.tools.map(t => t.name),
+    frankTools: frankTools.map(t => t.name),
   });
 
   bridge.sendTo(targetIgor.id as any, 'plan.submit', {
     id: plan.id,
     steps: plan.steps,
-    toolBag,  // Only the tools Igor needs for this task
-    toolSelectionReasoning: toolSelection.reasoning,
+    toolBag,  // Static tools + Frank dynamic tools
+    toolSelectionReasoning: `${toolSelection.reasoning} + ${frankTools.length} Frank dynamic tools`,
   });
 
   logger.info(`Plan ${plan.id} submitted to ${targetIgor.id}`, {
@@ -1451,12 +1633,33 @@ bridge.on('step.completed', (message: BridgeMessage) => {
   }
 });
 
+// Helper to serialize errors properly (handles objects, Error instances, etc.)
+function serializeErrorForStorage(error: unknown): string {
+  if (error === null || error === undefined) return 'Unknown error';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === 'object') {
+    // Try to extract useful info from error objects
+    const obj = error as Record<string, unknown>;
+    if (obj.message) return String(obj.message);
+    if (obj.error) return String(obj.error);
+    if (obj.code && obj.details) return `[${obj.code}] ${obj.details}`;
+    try {
+      return JSON.stringify(error, null, 0);
+    } catch {
+      return '[Complex error object]';
+    }
+  }
+  return String(error);
+}
+
 bridge.on('step.failed', (message: BridgeMessage) => {
-  const { planId, stepIndex, error } = message.payload as { planId: string; stepIndex: number; error: string };
+  const { planId, stepIndex, error } = message.payload as { planId: string; stepIndex: number; error: unknown };
   const correlationId = message.correlationId;
   const state = activePlans.get(planId);
+  const errorStr = serializeErrorForStorage(error);
   if (state) {
-    state.errors.push(`Step ${stepIndex}: ${error}`);
+    state.errors.push(`Step ${stepIndex + 1}: ${errorStr}`);
     logger.error(`Plan ${planId} step ${stepIndex + 1} failed: ${error}`, { planId, stepIndex, error, correlationId });
 
     // Record experience from failed step
@@ -1537,7 +1740,7 @@ bridge.on('step.failed', (message: BridgeMessage) => {
 });
 
 // Handle tool creation responses from Frankenstein
-bridge.on('tool.created' as any, (message: BridgeMessage) => {
+bridge.on('tool.created' as any, async (message: BridgeMessage) => {
   const { id, name, status } = message.payload as { id: string; name: string; status: string };
   const requestId = message.correlationId;
 
@@ -1581,6 +1784,48 @@ bridge.on('tool.created' as any, (message: BridgeMessage) => {
       level: 'info',
       text: `[Doctor] New tool available: ${name} - created to help with ${pattern?.action} failures`,
     });
+
+    // PHASE 4: Restart Frank to load new tool, then retry the plan
+    logger.info(`🔄 Restarting Frank to load new tool: ${name}`);
+    const restarted = await restartFrank(`tool-created: ${name}`);
+
+    if (restarted) {
+      // Check if the original plan is still active and can be retried
+      const planState = activePlans.get(pending.planId);
+      if (planState && planState.status === 'failed') {
+        logger.info(`📤 Retrying plan ${pending.planId} with new tool: ${name}`);
+
+        // Reset plan state for retry
+        planState.status = 'pending';
+        planState.currentStep = pending.stepIndex;
+        planState.errors = [];
+
+        // Get tool selection including new Frank tools
+        const toolSelection = selectToolsForIntent(planState.plan.intent, 15);
+        const frankTools = getFrankToolsForIgor();
+        const toolBag = [
+          ...toolSelection.tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+          })),
+          ...frankTools,
+        ];
+
+        // Resubmit to Igor with new tool
+        const targetIgor = getAvailableIgor();
+        if (targetIgor) {
+          markIgorBusy(targetIgor.id, pending.planId);
+          bridge.sendTo(targetIgor.id as any, 'plan.submit', {
+            id: pending.planId,
+            steps: planState.plan.steps,
+            toolBag,
+            toolSelectionReasoning: `Retry with new Frank tool: ${name}`,
+          });
+          logger.info(`📤 Plan ${pending.planId} resubmitted to ${targetIgor.id}`);
+        }
+      }
+    }
   } else {
     logger.info(`🔧 Frank created tool (no pending request): ${name}`, { toolId: id, status });
   }
@@ -2404,6 +2649,17 @@ async function start() {
 
   // Connect to Bridge with retry
   await connectWithRetry();
+
+  // Initial Frank tool sync
+  logger.info('Syncing tools from Frankenstein...');
+  await syncToolsFromFrank();
+
+  // Periodic Frank tool sync
+  setInterval(async () => {
+    if (Date.now() - frankToolsSyncedAt > FRANK_TOOLS_SYNC_INTERVAL) {
+      await syncToolsFromFrank();
+    }
+  }, FRANK_TOOLS_SYNC_INTERVAL);
 
   logger.info('Doctor ready. Awaiting intents...');
 }

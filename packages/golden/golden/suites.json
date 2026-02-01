@@ -1,0 +1,44 @@
+{
+  "suites": [
+    {
+      "id": "nl-authoring",
+      "name": "NL Authoring",
+      "description": "Natural language test authoring golden tests",
+      "cases": ["login-positive", "login-negative"],
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "id": "ai-generation",
+      "name": "AI Generation",
+      "description": "AI-generated test quality validation",
+      "cases": [],
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "id": "rca",
+      "name": "Root Cause Analysis",
+      "description": "RCA accuracy validation",
+      "cases": [],
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "id": "healing",
+      "name": "Self-Healing",
+      "description": "Self-healing selector validation",
+      "cases": ["id-to-class"],
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "id": "a11y",
+      "name": "Accessibility",
+      "description": "Accessibility analysis validation",
+      "cases": [],
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    }
+  ]
+}

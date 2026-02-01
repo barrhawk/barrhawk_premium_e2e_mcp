@@ -1,0 +1,25 @@
+{
+  "id": "id-to-class",
+  "name": "Self-healing finds element when ID changes to class",
+  "description": "Test that healing recovers when #login-btn becomes .login-btn",
+  "suite": "healing",
+  "input": {
+    "tool": "browser_click",
+    "args": {
+      "selector": "#login-btn",
+      "self_heal": true
+    },
+    "fixture": "healing-id-to-class"
+  },
+  "expected": {
+    "assertions": [
+      { "path": "$.healed", "operator": "equals", "expected": true, "weight": 0.3 },
+      { "path": "$.newSelector", "operator": "contains", "expected": "login", "weight": 0.3 },
+      { "path": "$.strategy", "operator": "in", "expected": ["class", "text", "aria", "data-testid"], "weight": 0.2 },
+      { "path": "$.confidence", "operator": ">=", "expected": 0.7, "weight": 0.2 }
+    ]
+  },
+  "matchMode": "structure",
+  "threshold": 0.8,
+  "tags": ["healing", "selector", "id-to-class"]
+}

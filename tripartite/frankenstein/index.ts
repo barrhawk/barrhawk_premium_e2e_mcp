@@ -23,25 +23,135 @@ import { Errors, serializeError, TripartiteError } from '../shared/errors.js';
 import { createLogger, startTimer } from '../shared/logger.js';
 import { toolRegistry, createToolContext, DynamicTool, ToolSchema, IgorExport } from './dynamic-tools.js';
 import { takeScreenshot, detectTools, getSystemToolDefinitions } from './system-tools.js';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'fs';
+
+// =============================================================================
+// Multi-instance support - MUST be defined first
+// =============================================================================
+const FRANK_INSTANCE_ID = process.env.FRANK_INSTANCE_ID || '';
+
+// =============================================================================
+// PHASE 1: Single Instance Guard (PID File per instance)
+// =============================================================================
+// PID file is unique per instance ID to allow multiple instances
+const PID_FILE = FRANK_INSTANCE_ID ? `/tmp/frankenstein-${FRANK_INSTANCE_ID}.pid` : '/tmp/frankenstein.pid';
+
+function ensureSingleInstance(): void {
+  if (existsSync(PID_FILE)) {
+    try {
+      const oldPid = parseInt(readFileSync(PID_FILE, 'utf-8').trim());
+      // Check if the old process is still running
+      try {
+        process.kill(oldPid, 0); // Signal 0 = check if process exists
+        console.error(`[Frankenstein] Another instance already running (PID ${oldPid}). Exiting.`);
+        process.exit(1);
+      } catch {
+        // Old process is dead, remove stale PID file
+        console.log(`[Frankenstein] Removing stale PID file (old PID ${oldPid} not running)`);
+        unlinkSync(PID_FILE);
+      }
+    } catch (err) {
+      // Error reading PID file, remove it
+      console.log(`[Frankenstein] Removing invalid PID file`);
+      try { unlinkSync(PID_FILE); } catch {}
+    }
+  }
+
+  // Write our PID
+  writeFileSync(PID_FILE, process.pid.toString());
+  console.log(`[Frankenstein] PID file written: ${PID_FILE} (PID: ${process.pid})`);
+
+  // Clean up PID file on exit
+  const cleanupPidFile = () => {
+    try {
+      if (existsSync(PID_FILE)) {
+        const currentPid = readFileSync(PID_FILE, 'utf-8').trim();
+        if (currentPid === process.pid.toString()) {
+          unlinkSync(PID_FILE);
+        }
+      }
+    } catch {}
+  };
+
+  process.on('exit', cleanupPidFile);
+  process.on('SIGTERM', cleanupPidFile);
+  process.on('SIGINT', cleanupPidFile);
+}
+
+// Run single instance check immediately
+ensureSingleInstance();
+
+// =============================================================================
+// PHASE 1: Reconnection Backoff
+// =============================================================================
+let reconnectAttempts = 0;
+const MAX_RECONNECT_BACKOFF = 30000; // 30 seconds max
+const RECONNECT_BASE_MS = 1000;
+
+function getReconnectDelay(): number {
+  const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), MAX_RECONNECT_BACKOFF);
+  // Add 20% jitter to prevent thundering herd
+  const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+  reconnectAttempts++;
+  return Math.max(500, Math.round(delay + jitter));
+}
+
+function resetReconnectBackoff(): void {
+  reconnectAttempts = 0;
+}
 
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
 // =============================================================================
-const FRANKENSTEIN_VERSION = '2026-01-28-v9-video-recording';
+const FRANKENSTEIN_VERSION = '2026-01-30-v10-stable-websocket';
 
 // =============================================================================
 // Configuration
 // =============================================================================
-const PORT = parseInt(process.env.FRANKENSTEIN_PORT || '7003');
+const REQUESTED_PORT = parseInt(process.env.FRANKENSTEIN_PORT || '7003');
 const BRIDGE_URL = process.env.BRIDGE_URL || 'ws://localhost:7000';
 const BRIDGE_AUTH_TOKEN = process.env.BRIDGE_AUTH_TOKEN || '';
 
+// Port will be set after checking availability
+let PORT = REQUESTED_PORT;
+
+/**
+ * Check if a port is available
+ */
+async function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = require('net').createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port);
+  });
+}
+
+/**
+ * Find an available port starting from the requested port
+ */
+async function findAvailablePort(startPort: number, maxAttempts: number = 10): Promise<number> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = startPort + i;
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+    console.log(`[Frankenstein] Port ${port} in use, trying ${port + 1}...`);
+  }
+  throw new Error(`No available port found in range ${startPort}-${startPort + maxAttempts - 1}`);
+}
+
+// Component ID for Bridge registration (allows multiple instances)
+const COMPONENT_ID = FRANK_INSTANCE_ID ? `frankenstein-${FRANK_INSTANCE_ID}` : 'frankenstein' as const;
+
 // =============================================================================
-// Logger
+// Logger - Uses component ID for multi-instance logging
 // =============================================================================
 const logger = createLogger({
-  component: 'frankenstein',
+  component: COMPONENT_ID,
   version: FRANKENSTEIN_VERSION,
   minLevel: (process.env.LOG_LEVEL as any) || 'INFO',
   pretty: process.env.LOG_FORMAT !== 'json',
@@ -120,7 +230,7 @@ setInterval(() => {
 // Bridge Client
 // =============================================================================
 const bridge = new BridgeClient({
-  componentId: 'frankenstein',
+  componentId: COMPONENT_ID as any,  // Support multi-instance (frankenstein, frankenstein-1, etc.)
   version: FRANKENSTEIN_VERSION,
   bridgeUrl: BRIDGE_URL,
   authToken: BRIDGE_AUTH_TOKEN,
@@ -188,7 +298,10 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           browser = (context as any).browser?.() || null;
           page = context.pages()[0] || await context.newPage();
         } else {
-          browser = await chromium.launch({ headless: opts.headless ?? false });
+          browser = await chromium.launch({
+            headless: opts.headless ?? false,
+            args: ['--window-size=1280,720', '--window-position=0,0'],
+          });
 
           // Context options with optional video recording
           const contextOpts: any = {
@@ -196,19 +309,24 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           };
 
           if (opts.recordVideo) {
-            const videoFilename = `recording-${Date.now()}`;
+            // Don't set size - let Playwright auto-match to actual viewport
+            // This prevents gray borders when window manager constrains the window
             contextOpts.recordVideo = {
               dir: VIDEOS_DIR,
-              size: opts.videoSize || { width: 1280, height: 720 },
+              ...(opts.videoSize ? { size: opts.videoSize } : {}),
             };
             isRecording = true;
             recordingStartTime = Date.now();
-            currentVideoPath = null; // Will be set when we get the path
-            logger.info('Video recording enabled', { dir: VIDEOS_DIR });
+            currentVideoPath = null;
+            logger.info('Video recording enabled', { dir: VIDEOS_DIR, autoSize: !opts.videoSize });
           }
 
           context = await browser.newContext(contextOpts);
           page = await context.newPage();
+
+          // Ensure viewport exactly matches video size for clean recordings
+          const viewportSize = opts.viewport || { width: 1280, height: 720 };
+          await page.setViewportSize(viewportSize);
 
           // If recording, track the video path
           if (opts.recordVideo && page) {
@@ -805,6 +923,38 @@ bridge.on('system.window.focus', async (message: BridgeMessage) => {
 });
 
 // =============================================================================
+// PHASE 1: Shutdown Handler (from Doctor for tool reloads)
+// =============================================================================
+bridge.on('shutdown' as any, async (message: BridgeMessage) => {
+  const { reason } = (message.payload || {}) as { reason?: string };
+  logger.info(`Shutdown requested: ${reason || 'no reason given'}`);
+
+  // Close browser if open
+  if (browser) {
+    try {
+      await browser.close();
+    } catch {}
+    browser = null;
+    context = null;
+    page = null;
+  }
+
+  // Disconnect from bridge gracefully
+  bridge.disconnect();
+
+  // Clean up PID file
+  try {
+    if (existsSync(PID_FILE)) {
+      unlinkSync(PID_FILE);
+    }
+  } catch {}
+
+  // Exit process (Doctor will restart us)
+  logger.info('Frankenstein shutting down for restart...');
+  process.exit(0);
+});
+
+// =============================================================================
 // Debug Session State
 // =============================================================================
 let debugSession: {
@@ -1088,10 +1238,22 @@ setInterval(() => {
 // Startup
 // =============================================================================
 async function start() {
+  // Find available port before starting
+  try {
+    PORT = await findAvailablePort(REQUESTED_PORT);
+    if (PORT !== REQUESTED_PORT) {
+      console.log(`[Frankenstein] Using port ${PORT} (requested ${REQUESTED_PORT} was in use)`);
+    }
+  } catch (err) {
+    console.error(`[Frankenstein] Failed to find available port: ${err}`);
+    process.exit(1);
+  }
+
   logger.info('='.repeat(60));
   logger.info(`FRANKENSTEIN - Starting version ${FRANKENSTEIN_VERSION}`);
+  logger.info(`Component ID: ${COMPONENT_ID}${FRANK_INSTANCE_ID ? ` (instance: ${FRANK_INSTANCE_ID})` : ''}`);
   logger.info(`PID: ${process.pid}`);
-  logger.info(`Port: ${PORT}`);
+  logger.info(`Port: ${PORT}${PORT !== REQUESTED_PORT ? ` (auto-assigned, requested ${REQUESTED_PORT})` : ''}`);
   logger.info(`Bridge: ${BRIDGE_URL}`);
   logger.info(`Screenshots: ${SCREENSHOTS_DIR}`);
   logger.info('='.repeat(60));
@@ -1135,11 +1297,18 @@ async function start() {
     logger.info(`Health endpoint: http://localhost:${PORT}/health`);
   });
 
-  // Connect to Bridge
-  const connected = await bridge.connect();
-  if (!connected) {
-    logger.error('Failed to connect to Bridge');
-    logger.info('Will retry connection...');
+  // Connect to Bridge with backoff retry
+  let connected = false;
+  while (!connected) {
+    connected = await bridge.connect();
+    if (connected) {
+      resetReconnectBackoff();
+      logger.info('Connected to Bridge successfully');
+    } else {
+      const delay = getReconnectDelay();
+      logger.warn(`Failed to connect to Bridge, retrying in ${delay}ms (attempt ${reconnectAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
 
   logger.info('Frankenstein ready. Awaiting commands...');

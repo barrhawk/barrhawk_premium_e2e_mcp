@@ -1,0 +1,27 @@
+{
+  "id": "login-negative",
+  "name": "Login with wrong password shows error",
+  "description": "Test that NL authoring correctly generates a negative login test",
+  "suite": "nl-authoring",
+  "input": {
+    "tool": "test_from_description",
+    "args": {
+      "description": "test that wrong password shows error message",
+      "baseUrl": "http://localhost:4444/fixture/login"
+    }
+  },
+  "expected": {
+    "steps": [
+      { "action": "navigate|go", "target": "login", "required": true },
+      { "action": "type|fill", "target": "email|username", "required": true },
+      { "action": "type|fill", "target": "password", "value": "wrong|invalid|incorrect", "required": true },
+      { "action": "click", "target": "submit|sign.?in|login", "required": true },
+      { "action": "assert|expect|wait", "target": "error|alert|message", "required": true }
+    ],
+    "mustContain": ["error", "password", "invalid"],
+    "mustNotContain": ["success", "dashboard", "welcome"]
+  },
+  "matchMode": "semantic",
+  "threshold": 0.8,
+  "tags": ["login", "negative", "auth"]
+}

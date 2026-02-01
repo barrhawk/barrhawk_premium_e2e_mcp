@@ -2,6 +2,63 @@
 
 All notable changes to BarrHawk E2E will be documented in this file.
 
+## [0.4.0] - 2026-02-01
+
+### Added
+
+- **120+ Tools Total** - A+B+C+D implementation with comprehensive SDLC coverage:
+  - Browser automation (36 tools)
+  - Database operations - PostgreSQL, SQLite, Redis (18 tools)
+  - GitHub integration (18 tools)
+  - Docker & Compose management (18 tools)
+  - Filesystem operations (19 tools)
+  - MCP orchestration (10 tools)
+
+- **Playwright MCP Parity** - 22 new browser tools matching Microsoft Playwright MCP:
+  - `browser_snapshot`, `browser_evaluate`, `browser_console_messages`
+  - `browser_network_requests`, `browser_drag`, `browser_hover`
+  - `browser_select_option`, `browser_tabs`, `browser_pdf_save`
+  - `browser_tracing_start/stop`, and more
+
+- **Video Recording for Demos** - Capture browser sessions as video:
+  - `recordVideo` option in `frank_browser_launch`
+  - Headless mode for clean 2K recordings
+  - Video saved on browser close
+
+- **FakeBarrHawk Test Simulator** - Mock SaaS for testing:
+  - Storage panel simulator
+  - Full viewport CSS support
+  - Test environment for BarrHawk features
+
+- **Squad Mode (Multi-Context)** - v0.2.0-alpha capability for parallel test execution
+
+- **Frankenstack Dashboards** - New dashboard variants:
+  - `dashboard-max` - Full-featured React dashboard
+  - `dashboard-min` - Minimal war room view
+  - Real-time tripartite architecture visualization
+
+- **New Packages**:
+  - `packages/api` - API layer
+  - `packages/db` - Database abstraction with Prisma
+  - `packages/golden` - Golden test fixtures and scoring
+  - `packages/live-view` - Live testing WebSocket service
+  - `packages/premium` - Flaky detector, session replay, Slack notifications, visual diff
+  - `packages/ui` - Shared UI components
+
+### Changed
+
+- **MCP-Frank Error Handling** - Improved error messages for AI consumption
+- **Tripartite Architecture Specs** - Updated Bridge, Doctor, Igor, Frankenstein specs
+- **Sidebar Extension** - Dashboard updates with screenshots and documentation
+
+### Fixed
+
+- `frank_execute` flow with plan.execute handler in Doctor
+- FakeBarrHawk CSS now fills full viewport
+- Video recording headless mode for clean demos
+
+---
+
 ## [0.3.1] - 2026-01-28
 
 ### Added

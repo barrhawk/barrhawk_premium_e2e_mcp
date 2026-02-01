@@ -1,0 +1,28 @@
+{
+  "name": "@barrhawk/premium",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Premium features for BarrHawk E2E testing platform",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx test-premium.ts"
+  },
+  "dependencies": {
+    "@barrhawk/observability": "file:../observability",
+    "sharp": "^0.33.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "tsx": "^4.21.0"
+  },
+  "keywords": [
+    "visual-testing",
+    "screenshot-diffing",
+    "flaky-tests",
+    "session-replay",
+    "slack-notifications"
+  ]
+}

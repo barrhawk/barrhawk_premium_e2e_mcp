@@ -1,0 +1,33 @@
+{
+  "name": "barrhawk-frank",
+  "version": "1.0.0",
+  "description": "Frankenstein MCP - Dynamic tool creation and hot reloading for Claude Code",
+  "type": "module",
+  "bin": {
+    "barrhawk-frank": "./dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "dynamic-tools",
+    "hot-reload",
+    "e2e",
+    "testing"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3"
+  }
+}

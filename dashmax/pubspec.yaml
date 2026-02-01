@@ -1,0 +1,44 @@
+name: dashmax
+description: BarrHawk Premium Dashboard - Mission Control for the Monster
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  provider: ^6.1.1
+
+  # WebSocket
+  web_socket_channel: ^2.4.0
+
+  # Window management (desktop)
+  window_manager: ^0.3.7
+
+  # Animations
+  flutter_animate: ^4.3.0
+
+  # Icons
+  lucide_icons: ^0.257.0
+
+  # Storage
+  shared_preferences: ^2.2.2
+
+  # Google Fonts for JetBrains Mono and Inter
+  google_fonts: ^6.1.0
+
+  # Utils
+  intl: ^0.18.1
+  collection: ^1.18.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true

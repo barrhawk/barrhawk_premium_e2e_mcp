@@ -27,7 +27,7 @@ import { frankManager } from './frank-manager.js';
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
 // =============================================================================
-const IGOR_VERSION = '2026-01-25-v15-frank-integration';
+const IGOR_VERSION = '2026-01-30-v16-dynamic-toolbag';
 
 // =============================================================================
 // Configuration
@@ -714,6 +714,22 @@ async function executePlan(plan: Plan): Promise<void> {
   currentPlan = null;
 }
 
+// =============================================================================
+// PHASE 3: Current Tool Bag from Doctor
+// =============================================================================
+let currentToolBag: ToolBagItem[] = [];
+
+function setToolBag(tools: ToolBagItem[]): void {
+  currentToolBag = tools;
+  logger.info(`🧰 Tool bag updated: ${tools.length} tools`, {
+    tools: tools.map(t => t.name),
+  });
+}
+
+function hasToolInBag(toolName: string): boolean {
+  return currentToolBag.some(t => t.name === toolName || t.name === `frank_${toolName}`);
+}
+
 async function executeStep(step: PlanStep): Promise<unknown> {
   const timeout = step.timeout || 30000;
 
@@ -740,9 +756,80 @@ async function executeStep(step: PlanStep): Promise<unknown> {
       await new Promise(resolve => setTimeout(resolve, step.params.ms as number || 1000));
       return { waited: step.params.ms };
 
+    // PHASE 3: Execute intent using available tools from tool bag
+    case 'execute_intent':
+      return executeIntentWithToolBag(step.params.intent as string, timeout);
+
     default:
+      // Check if this is a Frank dynamic tool from the tool bag
+      if (step.action.startsWith('frank_') && hasToolInBag(step.action)) {
+        logger.info(`🔧 Invoking Frank tool from bag: ${step.action}`);
+        return sendToFrankenstein(`tool.invoke`, {
+          toolName: step.action.replace('frank_', ''),
+          params: step.params,
+        }, timeout);
+      }
+
       throw Errors.unknownAction(step.action);
   }
+}
+
+/**
+ * PHASE 3: Execute intent by analyzing it and mapping to tool calls
+ */
+async function executeIntentWithToolBag(intent: string, timeout: number): Promise<unknown> {
+  const intentLower = intent.toLowerCase();
+  const results: unknown[] = [];
+
+  logger.info(`🎯 Executing intent with tool bag: "${intent.substring(0, 50)}..."`, {
+    availableTools: currentToolBag.length,
+  });
+
+  // Simple intent parsing - map keywords to actions
+  // This allows Igor to use the tool bag dynamically
+
+  // Navigation
+  const urlMatch = intent.match(/navigate to (\S+)/i) || intent.match(/go to (\S+)/i);
+  if (urlMatch && hasToolInBag('browser_navigate')) {
+    const result = await sendToFrankenstein('browser.navigate', { url: urlMatch[1] }, timeout);
+    results.push({ action: 'navigate', result });
+  }
+
+  // Click
+  const clickMatch = intent.match(/click (?:on )?["'](.+?)["']/i) || intent.match(/click (?:the )?(\w+)/i);
+  if (clickMatch && hasToolInBag('browser_click')) {
+    const target = clickMatch[1];
+    const result = await sendToFrankenstein('browser.click', { text: target }, timeout);
+    results.push({ action: 'click', result });
+  }
+
+  // Type
+  const typeMatch = intent.match(/type ["'](.+?)["']/i) || intent.match(/enter ["'](.+?)["']/i);
+  if (typeMatch && hasToolInBag('browser_type')) {
+    const text = typeMatch[1];
+    // Try to find selector from intent
+    const intoMatch = intent.match(/into (\S+)/i);
+    const params: Record<string, unknown> = { text };
+    if (intoMatch) params.selector = intoMatch[1];
+    const result = await sendToFrankenstein('browser.type', params, timeout);
+    results.push({ action: 'type', result });
+  }
+
+  // Screenshot
+  if ((intentLower.includes('screenshot') || intentLower.includes('capture')) && hasToolInBag('browser_screenshot')) {
+    const result = await sendToFrankenstein('browser.screenshot', {}, timeout);
+    results.push({ action: 'screenshot', result });
+  }
+
+  // Report tool usage to Doctor
+  bridge.sendTo('doctor', 'tool.used' as any, {
+    action: 'execute_intent',
+    intent: intent.substring(0, 100),
+    toolsUsed: results.map(r => (r as { action: string }).action),
+    toolBagSize: currentToolBag.length,
+  });
+
+  return { intent, results };
 }
 
 function sendToFrankensteinRaw(type: string, payload: unknown, timeout: number): Promise<unknown> {
@@ -861,14 +948,17 @@ bridge.on('plan.submit', async (message: BridgeMessage) => {
     toolSelectionReasoning: payload.toolSelectionReasoning,
   };
 
-  // Log tool bag if provided
+  // PHASE 3: Load tool bag from Doctor
   if (plan.toolBag && plan.toolBag.length > 0) {
-    logger.info(`🧰 Received tool bag with ${plan.toolBag.length} tools:`, {
+    setToolBag(plan.toolBag);
+    logger.info(`🧰 Tool bag loaded: ${plan.toolBag.length} tools from Doctor`, {
       tools: plan.toolBag.map(t => t.name),
       reasoning: plan.toolSelectionReasoning,
     });
   } else {
-    logger.info(`📦 No tool bag provided - using all available tools`);
+    // No tool bag - use default empty (will rely on hardcoded actions)
+    setToolBag([]);
+    logger.info(`📦 No tool bag provided - using default actions only`);
   }
 
   // Execute asynchronously
@@ -1291,6 +1381,18 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       sendJson(res, 200, {
         tools: stableToolkit.list(),
         stats: stableToolkit.getStats(),
+      });
+      return;
+    }
+
+    // Current tool bag from Doctor (Phase 3 autopsy endpoint)
+    if (path === '/toolbag' && method === 'GET') {
+      sendJson(res, 200, {
+        toolBag: currentToolBag,
+        count: currentToolBag.length,
+        currentPlan: currentPlan?.id || null,
+        currentStep,
+        executionStatus: status,
       });
       return;
     }

@@ -31,6 +31,7 @@ interface DashboardState {
   igors: any[];
   events: any[];
   reports: any[];
+  toolbag: any;  // Igor's current tool bag
   stats: { total: number; passed: number; failed: number; successRate: string };
   lastScreenshot: string | null;
   lastUpdate: number;
@@ -46,6 +47,7 @@ const state: DashboardState = {
   igors: [],
   events: [],
   reports: [],
+  toolbag: null,
   stats: { total: 0, passed: 0, failed: 0, successRate: '-' },
   lastScreenshot: null,
   lastUpdate: 0,
@@ -99,7 +101,7 @@ async function fetchJson(url: string): Promise<any> {
 
 // Update state
 async function updateState() {
-  const [bridge, doctor, igor, frank, doctorFrank, plans, igors, reports] = await Promise.all([
+  const [bridge, doctor, igor, frank, doctorFrank, plans, igors, reports, toolbag] = await Promise.all([
     fetchJson(`${BRIDGE_URL}/health`),
     fetchJson(`${DOCTOR_URL}/health`),
     fetchJson(`${IGOR_URL}/health`),
@@ -108,6 +110,7 @@ async function updateState() {
     fetchJson(`${DOCTOR_URL}/plans`),
     fetchJson(`${DOCTOR_URL}/igors`),
     fetchJson(`${BRIDGE_URL}/reports`),
+    fetchJson(`${IGOR_URL}/toolbag`),
   ]);
 
   state.bridge = bridge;
@@ -115,8 +118,9 @@ async function updateState() {
   state.igor = igor;
   state.frankenstein = frank;
   state.doctorFrank = doctorFrank;
-  state.plans = plans?.plans || [];
-  state.igors = igors?.igors || [];
+  state.plans = Array.isArray(plans) ? plans : (plans?.plans || []);
+  state.igors = igors?.instances || igors?.igors || [];
+  state.toolbag = toolbag;
 
   const reportList = Array.isArray(reports) ? reports : (reports?.reports || []);
   state.reports = reportList;
@@ -299,6 +303,43 @@ const HTML = `<!DOCTYPE html>
     .metric-value.yellow { color: var(--yellow); }
     .metric-value.neutral { color: var(--text-secondary); }
 
+    /* Toolbag Section */
+    .toolbag-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .toolbag-list { display: flex; flex-wrap: wrap; gap: 4px; max-height: 80px; overflow-y: auto; }
+    .tool-chip { font-size: 9px; padding: 3px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; color: var(--text-secondary); font-family: var(--font-mono); }
+    .tool-chip.frank { border-color: rgba(124,58,237,0.3); color: var(--purple); }
+    .toolbag-empty { color: var(--muted); font-size: 11px; }
+
+    /* Autopsy Modal */
+    .autopsy-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: none; align-items: center; justify-content: center; }
+    .autopsy-overlay.active { display: flex; }
+    .autopsy-modal { background: var(--card); border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 800px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }
+    .autopsy-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .autopsy-title { font-size: 14px; font-weight: 600; }
+    .autopsy-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 4px 8px; }
+    .autopsy-close:hover { color: var(--text); }
+    .autopsy-content { padding: 20px; overflow-y: auto; flex: 1; }
+    .autopsy-section { margin-bottom: 20px; }
+    .autopsy-section-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; font-weight: 600; }
+    .autopsy-intent { font-size: 14px; color: var(--text); margin-bottom: 8px; line-height: 1.5; padding: 12px; background: var(--bg); border-radius: var(--radius); }
+    .autopsy-meta { display: flex; gap: 16px; font-size: 11px; color: var(--text-secondary); margin-bottom: 16px; }
+    .autopsy-steps { display: flex; flex-direction: column; gap: 8px; }
+    .autopsy-step { background: var(--bg); border-radius: var(--radius); padding: 12px; border-left: 3px solid var(--border); }
+    .autopsy-step.done { border-left-color: var(--green); }
+    .autopsy-step.failed { border-left-color: var(--red); }
+    .autopsy-step.pending { border-left-color: var(--muted); }
+    .autopsy-step-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .autopsy-step-num { font-size: 10px; font-weight: 700; color: var(--muted); }
+    .autopsy-step-action { font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
+    .autopsy-step-params { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); word-break: break-all; margin-top: 4px; }
+    .autopsy-step-result { font-size: 10px; margin-top: 6px; padding: 6px 8px; background: var(--card); border-radius: 3px; }
+    .autopsy-step-result.success { color: var(--green); }
+    .autopsy-step-result.error { color: var(--red); }
+    .autopsy-errors { background: var(--red-dim); border: 1px solid rgba(239,68,68,0.2); border-radius: var(--radius); padding: 12px; }
+    .autopsy-error { font-size: 11px; color: var(--red); font-family: var(--font-mono); margin-bottom: 6px; line-height: 1.4; }
+    .autopsy-error:last-child { margin-bottom: 0; }
+    .autopsy-toolbag { display: flex; flex-wrap: wrap; gap: 6px; }
+
     /* Scrollbar */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -375,6 +416,11 @@ const HTML = `<!DOCTYPE html>
         <span id="frank-threshold" style="display:none">2</span>
       </div>
 
+      <div class="toolbag-section">
+        <div class="section-header">Igor Tool Bag <span class="section-badge" id="toolbag-count">0</span></div>
+        <div class="toolbag-list" id="toolbag"><span class="toolbag-empty">No tools loaded</span></div>
+      </div>
+
       <div class="events-box">
         <div class="events-header">
           <div class="section-header" style="margin-bottom:0">Live Events</div>
@@ -389,6 +435,19 @@ const HTML = `<!DOCTYPE html>
       <div class="metric"><div class="metric-value red" id="m-failed">0</div><div class="metric-label">Failed</div></div>
       <div class="metric"><div class="metric-value neutral" id="m-agents">1</div><div class="metric-label">Agents</div></div>
       <div class="metric"><div class="metric-value green" id="m-success">-</div><div class="metric-label">Success %</div></div>
+    </div>
+  </div>
+
+  <!-- Autopsy Modal -->
+  <div class="autopsy-overlay" id="autopsy-overlay" onclick="if(event.target===this)closeAutopsy()">
+    <div class="autopsy-modal">
+      <div class="autopsy-header">
+        <span class="autopsy-title" id="autopsy-title">Plan Autopsy</span>
+        <button class="autopsy-close" onclick="closeAutopsy()">&times;</button>
+      </div>
+      <div class="autopsy-content" id="autopsy-content">
+        <!-- Filled by JS -->
+      </div>
     </div>
   </div>
 
@@ -427,6 +486,7 @@ function updateUI(s) {
   renderReports(s.reports || []);
   renderAgents(s.igors || [], s.igor, s.doctor, s.frankenstein);
   updateFrankFlow(s.doctorFrank);
+  renderToolbag(s.toolbag);
 
   if (s.frankenstein?.browserActive) fetchScreenshot();
 }
@@ -438,13 +498,18 @@ function renderPlans(plans) {
   setText('plan-count', plans.length);
   const el = document.getElementById('plans');
   if (!plans.length) { el.innerHTML = '<div class="plan-empty">No active plans</div>'; return; }
-  el.innerHTML = plans.slice(0, 5).map(p =>
-    '<div class="plan"><div class="plan-id">' + (p.id || '').substring(0,8) + '</div>' +
-    '<div class="plan-intent">' + esc(p.intent || 'Unknown intent') + '</div>' +
-    '<div class="plan-steps">' + (p.steps || []).map((st,i) =>
-      '<span class="step ' + (st.status || '') + '">' + (i+1) + '</span>'
-    ).join('') + '</div></div>'
-  ).join('');
+  el.innerHTML = plans.slice(0, 5).map(p => {
+    const stepIndicators = Array.from({length: p.totalSteps || 0}, (_,i) => {
+      const status = i < p.currentStep ? 'done' : i === p.currentStep ? 'active' : 'pending';
+      return '<span class="step ' + status + '">' + (i+1) + '</span>';
+    }).join('');
+    return '<div class="plan" style="cursor:pointer" onclick="openAutopsy(\\'' + (p.id || '') + '\\')">' +
+      '<div class="plan-id">' + (p.id || '').substring(0,8) + ' &middot; ' + (p.status || 'unknown') + '</div>' +
+      '<div class="plan-intent">' + esc(p.intent || 'Unknown intent') + '</div>' +
+      '<div class="plan-steps">' + stepIndicators + '</div>' +
+      (p.errors?.length ? '<div style="font-size:10px;color:var(--red);margin-top:6px">' + esc(p.errors[0]) + '</div>' : '') +
+      '</div>';
+  }).join('');
 }
 
 function renderReports(reports) {
@@ -460,13 +525,95 @@ function renderReports(reports) {
     const steps = r.data?.steps || r.steps?.length || r.stepCount || 0;
     const time = r.completedAt || r.timestamp;
     const ts = time ? new Date(time).toLocaleTimeString() : '';
-    return '<div class="result ' + cls + '">' +
+    const planId = r.planId || r.id || '';
+    return '<div class="result ' + cls + '" style="cursor:pointer" onclick="openAutopsy(\\'' + planId + '\\')">' +
       '<div class="result-header">' +
       '<span class="result-badge ' + cls + '">' + (ok ? 'PASS' : 'FAIL') + '</span>' +
       '<span class="result-time">' + ts + '</span></div>' +
       '<div class="result-intent" title="' + esc(rawIntent) + '">' + esc(intent) + '</div>' +
-      '<div class="result-meta"><span>' + steps + ' steps</span></div></div>';
+      '<div class="result-meta"><span>' + steps + ' steps</span>' +
+      (r.data?.errors?.length ? '<span style="color:var(--red)">' + r.data.errors.length + ' errors</span>' : '') +
+      '</div></div>';
   }).join('');
+}
+
+function renderToolbag(toolbag) {
+  const count = toolbag?.count || toolbag?.toolBag?.length || 0;
+  setText('toolbag-count', count);
+  const el = document.getElementById('toolbag');
+  if (!count) { el.innerHTML = '<span class="toolbag-empty">No tools loaded</span>'; return; }
+  const tools = toolbag.toolBag || [];
+  el.innerHTML = tools.map(t => {
+    const isFrank = t.name?.startsWith('frank_');
+    return '<span class="tool-chip' + (isFrank ? ' frank' : '') + '" title="' + esc(t.description || '') + '">' + esc(t.name) + '</span>';
+  }).join('');
+}
+
+async function openAutopsy(planId) {
+  if (!planId) return;
+  document.getElementById('autopsy-title').textContent = 'Loading...';
+  document.getElementById('autopsy-content').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">Loading plan details...</div>';
+  document.getElementById('autopsy-overlay').classList.add('active');
+
+  try {
+    const res = await fetch('/api/plan/' + planId);
+    const plan = await res.json();
+    if (plan.error) throw new Error(plan.error);
+    renderAutopsyContent(plan);
+  } catch (err) {
+    document.getElementById('autopsy-title').textContent = 'Error';
+    document.getElementById('autopsy-content').innerHTML = '<div style="color:var(--red);text-align:center;padding:40px">Failed to load plan: ' + esc(err.message) + '</div>';
+  }
+}
+
+function closeAutopsy() {
+  document.getElementById('autopsy-overlay').classList.remove('active');
+}
+
+function renderAutopsyContent(plan) {
+  document.getElementById('autopsy-title').textContent = 'Plan Autopsy: ' + (plan.id || '').substring(0,8);
+  const statusColor = plan.status === 'completed' ? 'var(--green)' : plan.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+
+  let html = '<div class="autopsy-section">' +
+    '<div class="autopsy-section-title">Intent</div>' +
+    '<div class="autopsy-intent">' + esc(plan.intent || 'Unknown') + '</div>' +
+    '<div class="autopsy-meta">' +
+    '<span>Status: <strong style="color:' + statusColor + '">' + (plan.status || 'unknown').toUpperCase() + '</strong></span>' +
+    '<span>Steps: ' + (plan.currentStep || 0) + '/' + (plan.totalSteps || 0) + '</span>' +
+    '<span>ID: ' + (plan.id || 'unknown') + '</span>' +
+    '</div></div>';
+
+  // Steps
+  if (plan.steps?.length) {
+    html += '<div class="autopsy-section"><div class="autopsy-section-title">Steps</div><div class="autopsy-steps">';
+    plan.steps.forEach((step, i) => {
+      const stepStatus = i < plan.currentStep ? 'done' : i === plan.currentStep && plan.status === 'failed' ? 'failed' : i === plan.currentStep ? 'active' : 'pending';
+      const result = plan.results?.[i];
+      html += '<div class="autopsy-step ' + stepStatus + '">' +
+        '<div class="autopsy-step-header">' +
+        '<span class="autopsy-step-num">STEP ' + (i+1) + '</span>' +
+        '<span class="autopsy-step-action">' + esc(step.action || 'unknown') + '</span>' +
+        '</div>' +
+        '<div class="autopsy-step-params">' + esc(JSON.stringify(step.params || {}, null, 0)) + '</div>';
+      if (result !== undefined) {
+        const isSuccess = result?.success !== false;
+        html += '<div class="autopsy-step-result ' + (isSuccess ? 'success' : 'error') + '">' +
+          (isSuccess ? 'OK' : 'FAILED') + ': ' + esc(JSON.stringify(result, null, 0).substring(0,200)) + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Errors
+  if (plan.errors?.length) {
+    html += '<div class="autopsy-section"><div class="autopsy-section-title">Errors</div>' +
+      '<div class="autopsy-errors">' +
+      plan.errors.map(e => '<div class="autopsy-error">' + esc(e) + '</div>').join('') +
+      '</div></div>';
+  }
+
+  document.getElementById('autopsy-content').innerHTML = html;
 }
 
 function renderAgents(igors, mainIgor, doctor, frank) {
@@ -622,6 +769,30 @@ Bun.serve({
     // API: State
     if (url.pathname === '/api/state') {
       return Response.json(state);
+    }
+
+    // API: Toolbag (Igor's current tools)
+    if (url.pathname === '/api/toolbag') {
+      return Response.json(state.toolbag || { toolBag: [], count: 0 });
+    }
+
+    // API: Full plan details (autopsy)
+    if (url.pathname.startsWith('/api/plan/')) {
+      const planId = url.pathname.replace('/api/plan/', '');
+      try {
+        const planDetails = await fetchJson(`${DOCTOR_URL}/plan/${planId}`);
+        if (planDetails) {
+          return Response.json(planDetails);
+        }
+        return Response.json({ error: 'Plan not found' }, { status: 404 });
+      } catch {
+        return Response.json({ error: 'Failed to fetch plan' }, { status: 500 });
+      }
+    }
+
+    // API: Plans list with full details
+    if (url.pathname === '/api/plans') {
+      return Response.json({ plans: state.plans });
     }
 
     // Health

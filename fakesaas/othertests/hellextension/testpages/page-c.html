@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffc107">
+  <title>Page Gamma - Hell Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #2d2a1a, #3d3820);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+    .container {
+      max-width: 600px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      background: #ffc107;
+      color: #000;
+      padding: 8px 24px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-size: 48px;
+      margin-bottom: 16px;
+      background: linear-gradient(90deg, #ffc107, #ffeb3b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #888;
+      margin-bottom: 32px;
+    }
+    .data-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .data-row:last-child { border-bottom: none; }
+    .data-label { color: #888; }
+    .data-value { color: #ffc107; font-weight: bold; }
+    .action-btn {
+      background: #ffc107;
+      color: #000;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin: 8px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .action-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(255, 193, 7, 0.4);
+    }
+    .action-btn.secondary {
+      background: transparent;
+      border: 2px solid #ffc107;
+      color: #ffc107;
+    }
+    .chaos-panel {
+      margin: 24px 0;
+      padding: 16px;
+      background: rgba(255,193,7,0.1);
+      border-radius: 8px;
+      border: 1px dashed #ffc107;
+    }
+    .chaos-panel h3 {
+      color: #ffc107;
+      margin-bottom: 12px;
+    }
+    .chaos-btn {
+      background: #333;
+      color: #ffc107;
+      border: 1px solid #ffc107;
+      padding: 8px 16px;
+      border-radius: 4px;
+      margin: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .chaos-btn:hover { background: #ffc107; color: #000; }
+    .timestamp { font-size: 12px; color: #666; margin-top: 24px; }
+    #rapid-log {
+      margin-top: 16px;
+      padding: 12px;
+      background: #111;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      max-height: 150px;
+      overflow-y: auto;
+      text-align: left;
+    }
+  </style>
+</head>
+<body
+  data-hell-page-id="GAMMA"
+  data-hell-theme-color="#ffc107"
+  data-hell-custom-data="This is Page Gamma - The Chaos Zone"
+>
+  <div class="container">
+    <div class="badge">TEST PAGE C</div>
+    <h1>Page Gamma</h1>
+    <p class="subtitle">The chaos testing page - rapid updates and state mutations</p>
+
+    <div class="data-card">
+      <div class="data-row">
+        <span class="data-label">Page ID</span>
+        <span class="data-value" id="page-id">GAMMA</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Theme Color</span>
+        <span class="data-value">#ffc107 (Yellow)</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Update Count</span>
+        <span class="data-value" id="update-count">0</span>
+      </div>
+    </div>
+
+    <div class="chaos-panel">
+      <h3>Chaos Controls</h3>
+      <button class="chaos-btn" onclick="rapidFire(10)">10 Rapid Updates</button>
+      <button class="chaos-btn" onclick="rapidFire(50)">50 Rapid Updates</button>
+      <button class="chaos-btn" onclick="randomMutate()">Random Mutations</button>
+      <button class="chaos-btn" onclick="titleFlicker()">Title Flicker</button>
+      <div id="rapid-log"></div>
+    </div>
+
+    <div>
+      <button class="action-btn" onclick="triggerUpdate()">Force Sidebar Update</button>
+      <button class="action-btn secondary" onclick="resetChaos()">Reset</button>
+    </div>
+
+    <p class="timestamp">Loaded at: <span id="timestamp"></span></p>
+  </div>
+
+  <script>
+    document.getElementById('timestamp').textContent = new Date().toISOString();
+
+    let updateCount = 0;
+    const logEl = document.getElementById('rapid-log');
+
+    function log(msg) {
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function rapidFire(count) {
+      log(`Starting ${count} rapid updates...`);
+
+      for (let i = 0; i < count; i++) {
+        setTimeout(() => {
+          updateCount++;
+          document.getElementById('update-count').textContent = updateCount;
+          document.body.setAttribute('data-hell-custom-data',
+            `Gamma - Update #${updateCount}`);
+          triggerUpdate();
+          log(`Update ${updateCount}`);
+        }, i * 50); // 50ms apart = 20 updates/second
+      }
+    }
+
+    function randomMutate() {
+      log('Random mutations starting...');
+
+      const interval = setInterval(() => {
+        const randomId = `GAMMA_${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+        document.body.setAttribute('data-hell-page-id', randomId);
+        document.getElementById('page-id').textContent = randomId;
+        triggerUpdate();
+        log(`Mutated to ${randomId}`);
+      }, 200);
+
+      setTimeout(() => {
+        clearInterval(interval);
+        document.body.setAttribute('data-hell-page-id', 'GAMMA');
+        document.getElementById('page-id').textContent = 'GAMMA';
+        triggerUpdate();
+        log('Mutations stopped, reset to GAMMA');
+      }, 3000);
+    }
+
+    function titleFlicker() {
+      log('Title flicker starting...');
+      const original = document.title;
+      let i = 0;
+
+      const interval = setInterval(() => {
+        document.title = i % 2 === 0 ? '⚠️ FLICKER!' : original;
+        i++;
+      }, 100);
+
+      setTimeout(() => {
+        clearInterval(interval);
+        document.title = original;
+        log('Title flicker stopped');
+      }, 2000);
+    }
+
+    function resetChaos() {
+      updateCount = 0;
+      document.getElementById('update-count').textContent = '0';
+      document.body.setAttribute('data-hell-page-id', 'GAMMA');
+      document.body.setAttribute('data-hell-custom-data', 'This is Page Gamma - The Chaos Zone');
+      document.getElementById('page-id').textContent = 'GAMMA';
+      logEl.innerHTML = '';
+      triggerUpdate();
+      log('Reset complete');
+    }
+
+    function triggerUpdate() {
+      if (window.__hellExtensionUpdate) {
+        window.__hellExtensionUpdate();
+      }
+    }
+  </script>
+</body>
+</html>

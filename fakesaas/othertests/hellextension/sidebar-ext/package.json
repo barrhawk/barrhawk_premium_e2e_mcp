@@ -1,0 +1,16 @@
+{
+  "name": "url-roaster-sidebar-test",
+  "version": "1.0.0",
+  "description": "Chrome sidebar extension + tests demonstrating OS-level screenshot requirement",
+  "type": "module",
+  "scripts": {
+    "icons": "cd icons && chmod +x generate.sh && ./generate.sh",
+    "test": "bun run test-sidebar.ts",
+    "test:barrhawk": "bun run test-with-barrhawk.ts",
+    "test:manual": "echo 'Load extension in chrome://extensions, enable Developer Mode, click Load Unpacked'"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0",
+    "bun-types": "latest"
+  }
+}

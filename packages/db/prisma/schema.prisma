@@ -1,0 +1,403 @@
+// BarrHawk E2E Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Users & Teams
+// ============================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  avatarUrl    String?
+  passwordHash String?
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime?
+  isAdmin      Boolean   @default(false)
+
+  memberships TeamMember[]
+  apiKeys     ApiKey[]
+  auditLogs   AuditLog[]   @relation("ActorLogs")
+}
+
+model Team {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  plan             Plan     @default(FREE)
+  stripeCustomerId String?
+  createdAt        DateTime @default(now())
+
+  members      TeamMember[]
+  projects     Project[]
+  subscription Subscription?
+  apiKeys      ApiKey[]
+  usageRecords UsageRecord[]
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String
+  userId   String
+  role     Role     @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+// ============================================
+// Projects & Tests
+// ============================================
+
+model Project {
+  id          String   @id @default(cuid())
+  teamId      String
+  name        String
+  slug        String
+  baseUrl     String
+  environment String   @default("production")
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team   Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  suites TestSuite[]
+  runs   TestRun[]
+
+  @@unique([teamId, slug])
+}
+
+model TestSuite {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  description String?
+  schedule    String? // Cron expression
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tests   Test[]
+  runs    TestRun[]
+}
+
+model Test {
+  id         String   @id @default(cuid())
+  suiteId    String
+  name       String
+  steps      Json // Array of test steps
+  assertions Json // Array of assertions
+  timeout    Int      @default(30000)
+  retries    Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  suite   TestSuite    @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  results TestResult[]
+}
+
+model TestRun {
+  id          String    @id @default(cuid())
+  projectId   String
+  suiteId     String?
+  status      RunStatus @default(PENDING)
+  trigger     String    @default("manual") // manual, scheduled, ci, webhook
+  triggeredBy String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  summary     Json?
+
+  // Origin classification for AI vs human test separation
+  origin            TestOrigin @default(HUMAN_API)
+  originConfidence  Float      @default(1.0)
+  originIndicators  String[]
+
+  project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  suite   TestSuite?  @relation(fields: [suiteId], references: [id])
+  results TestResult[]
+
+  @@index([projectId, origin, startedAt])
+}
+
+// Test origin classification
+enum TestOrigin {
+  AI_AGENT         // Claude Code, Cursor, AI IDEs
+  HUMAN_DASHBOARD  // Dashboard "Run" button
+  HUMAN_API        // Direct API call
+  SCHEDULED        // Cron trigger
+  CI_CD            // GitHub Actions, webhooks
+  WEBHOOK          // External webhook trigger
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  PASSED
+  FAILED
+  CANCELLED
+}
+
+model TestResult {
+  id        String       @id @default(cuid())
+  runId     String
+  testId    String
+  status    ResultStatus
+  duration  Int // milliseconds
+  error     String?
+  steps     Json // Step-by-step results
+  createdAt DateTime     @default(now())
+
+  run         TestRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  test        Test         @relation(fields: [testId], references: [id])
+  screenshots Screenshot[]
+}
+
+enum ResultStatus {
+  PASSED
+  FAILED
+  SKIPPED
+  ERROR
+}
+
+model Screenshot {
+  id        String   @id @default(cuid())
+  resultId  String
+  url       String // S3/R2 URL
+  step      Int
+  type      String   @default("viewport") // viewport, element, full
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+
+  result TestResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// API & Billing
+// ============================================
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  teamId     String
+  name       String
+  keyPrefix  String // First 8 chars for identification
+  keyHash    String    @unique // SHA-256 hash of full key
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  scopes     String[] // Array of allowed scopes
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  teamId               String   @unique
+  stripeSubscriptionId String   @unique
+  stripePriceId        String
+  status               String // active, canceled, past_due, etc.
+  plan                 Plan
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// Usage & Analytics
+// ============================================
+
+model UsageRecord {
+  id         String   @id @default(cuid())
+  teamId     String
+  type       String // test_run, screenshot, api_call, storage_bytes
+  count      Int      @default(1)
+  metadata   Json?
+  recordedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, type, recordedAt])
+}
+
+// ============================================
+// Integrations
+// ============================================
+
+model Integration {
+  id        String   @id @default(cuid())
+  teamId    String
+  type      String // github, gitlab, slack, discord, webhook, etc.
+  name      String
+  config    Json // Encrypted config data
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, type, name])
+}
+
+// ============================================
+// Feature Flags
+// ============================================
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  isEnabled   Boolean  @default(false)
+  percentage  Int      @default(100) // Rollout percentage
+  targeting   Json? // User/team targeting rules
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================
+// Audit Log
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String? // User ID or null for system
+  actorType  String // user, admin, system
+  action     String // create, update, delete, login, etc.
+  resource   String // project, test, user, subscription, etc.
+  resourceId String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("ActorLogs", fields: [actorId], references: [id])
+
+  @@index([actorId, createdAt])
+  @@index([resource, resourceId])
+}
+
+// ============================================
+// Event System (for real-time observability)
+// ============================================
+
+model Event {
+  id            String   @id
+  type          String   // Event type (e.g., 'test.run.started', 'screenshot.captured')
+  tenantId      String   // Team ID for multi-tenant isolation
+  correlationId String   // Test run ID for grouping related events
+  source        Json     // EventSource (type, origin, clientInfo, etc.)
+  payload       Json     // Event-specific data
+  timestamp     DateTime @default(now())
+  version       String   @default("1.0")
+  metadata      Json?
+
+  @@index([tenantId, timestamp])
+  @@index([correlationId])
+  @@index([type, tenantId, timestamp])
+  @@index([tenantId, type, timestamp])
+}
+
+// ============================================
+// System Metrics & Alerts
+// ============================================
+
+model AlertRule {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  metric       String   // Metric to monitor (e.g., 'error_rate', 'queue_depth')
+  operator     String   // >, <, ==, !=, >=, <=
+  threshold    Float
+  windowSecs   Int      @default(300) // Evaluation window in seconds
+  severity     Severity @default(WARNING)
+  channels     String[] // Notification channels (slack:ops, email:admin, etc.)
+  isEnabled    Boolean  @default(true)
+  cooldownSecs Int      @default(300) // Minimum time between alerts
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([name])
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model AlertHistory {
+  id         String   @id @default(cuid())
+  ruleId     String
+  ruleName   String
+  severity   Severity
+  metric     String
+  value      Float
+  threshold  Float
+  message    String?
+  channels   String[]
+  firedAt    DateTime @default(now())
+  resolvedAt DateTime?
+
+  @@index([ruleId, firedAt])
+  @@index([severity, firedAt])
+}
+
+// ============================================
+// Worker & Queue Management
+// ============================================
+
+model Worker {
+  id           String       @id @default(cuid())
+  workerId     String       @unique
+  region       String
+  status       WorkerStatus @default(STARTING)
+  capabilities String[]     // browser, audio, api, video
+  maxCapacity  Int          @default(10)
+  activeTests  Int          @default(0)
+  cpuUsage     Float?
+  memoryUsage  Float?
+  lastHeartbeat DateTime?
+  startedAt    DateTime     @default(now())
+  stoppedAt    DateTime?
+
+  @@index([status, region])
+}
+
+enum WorkerStatus {
+  STARTING
+  HEALTHY
+  DEGRADED
+  DOWN
+  STOPPED
+}
