@@ -25,6 +25,9 @@ export type ToolCategory =
   | 'backend_realtime'  // ws_connect, ws_send
   | 'backend_schema'    // graphql_query, grpc_call
   | 'backend_queue'     // queue_publish, queue_peek
+  | 'backend_mock'      // mock_server, mock_route
+  | 'mobile'            // mobile_launch, mobile_tap
+  | 'cli'               // cli_run
   | 'code_intelligence' // detective_analyze, bisect
   | 'assertions'        // assert_equals, assert_contains, assert_visible
   | 'ai_analysis'       // smart_assert, analyze_failure, suggest_fix
@@ -437,6 +440,73 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // MOBILE (Maestro)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'mobile_launch_app',
+    description: 'Launch a mobile app (iOS/Android) via Maestro.',
+    category: 'mobile',
+    tags: ['mobile', 'app', 'launch', 'ios', 'android', 'start'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'Package ID (com.example.app)' },
+      },
+      required: ['appId'],
+    },
+  },
+  {
+    name: 'mobile_tap_text',
+    description: 'Tap on text in a mobile app.',
+    category: 'mobile',
+    tags: ['mobile', 'tap', 'click', 'touch', 'text'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'mobile_input_text',
+    description: 'Type text into a mobile app.',
+    category: 'mobile',
+    tags: ['mobile', 'type', 'input', 'write', 'keyboard'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+      },
+      required: ['text'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CLI TESTING
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'cli_run',
+    description: 'Run a CLI command and capture output.',
+    category: 'cli',
+    tags: ['cli', 'command', 'terminal', 'exec', 'run', 'shell'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string' },
+        args: { type: 'array', items: { type: 'string' } },
+        expectExitCode: { type: 'number', default: 0 },
+        timeout: { type: 'number', default: 10000 },
+      },
+      required: ['command'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // BACKEND REAL-TIME (WebSockets)
   // ─────────────────────────────────────────────────────────────────────────────
   {
@@ -525,7 +595,104 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // BACKEND EVENTS (Queue/Kafka)
+  // BACKEND MOCKING (Spire)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'mock_server_start',
+    description: 'Start a programmable HTTP mock server. Returns the port.',
+    category: 'backend_mock',
+    tags: ['mock', 'server', 'start', 'http', 'api'],
+    weight: 95,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number', description: 'Specific port or 0 for random' },
+      },
+    },
+  },
+  {
+    name: 'mock_add_route',
+    description: 'Add a route response to the mock server.',
+    category: 'backend_mock',
+    tags: ['mock', 'route', 'add', 'response', 'stub'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number' },
+        method: { type: 'string', default: 'GET' },
+        path: { type: 'string', description: 'URL path or regex:pattern' },
+        response: {
+          type: 'object',
+          properties: {
+            status: { type: 'number', default: 200 },
+            body: { type: 'object' },
+            headers: { type: 'object' },
+            delay: { type: 'number', description: 'Latency in ms' },
+          },
+        },
+      },
+      required: ['port', 'path'],
+    },
+  },
+  {
+    name: 'mock_verify',
+    description: 'Verify requests made to the mock server.',
+    category: 'backend_mock',
+    tags: ['mock', 'verify', 'check', 'spy', 'calls'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number' },
+        routeId: { type: 'string', description: 'Optional: Filter by specific route ID' },
+      },
+      required: ['port'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BACKEND LOAD TESTING (Cannon)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'backend_load_test',
+    description: 'Run a load/stress test against an endpoint.',
+    category: 'backend_test',
+    tags: ['load', 'stress', 'performance', 'rps', 'concurrency'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        method: { type: 'string', default: 'GET' },
+        duration: { type: 'string', default: '10s' },
+        users: { type: 'number', default: 10 },
+        rps: { type: 'number', description: 'Target RPS (0 for unlimited)' },
+      },
+      required: ['url'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MCP AUDIT
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'mcp_audit_server',
+    description: 'Run a compliance audit on an MCP server (Schema check, error codes, etc).',
+    category: 'mcp_testing',
+    tags: ['mcp', 'audit', 'lint', 'check', 'compliance'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+      },
+      required: ['connectionId'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BACKEND QUEUE
   // ─────────────────────────────────────────────────────────────────────────────
   {
     name: 'queue_publish',
@@ -1094,6 +1261,21 @@ export const CATEGORY_INFO: Record<ToolCategory, {
     name: 'Message Queues',
     description: 'Event-driven verification (Kafka/RabbitMQ)',
     keywords: ['queue', 'kafka', 'rabbit', 'event', 'message', 'broker'],
+  },
+  backend_mock: {
+    name: 'Mocking Spire',
+    description: 'Instant HTTP/API mock servers',
+    keywords: ['mock', 'fake', 'stub', 'simulate', 'server', 'api'],
+  },
+  mobile: {
+    name: 'Mobile',
+    description: 'iOS/Android automation via Maestro',
+    keywords: ['mobile', 'app', 'ios', 'android', 'phone', 'tablet'],
+  },
+  cli: {
+    name: 'CLI',
+    description: 'Command line tool verification',
+    keywords: ['cli', 'terminal', 'shell', 'command', 'bash'],
   },
   code_intelligence: {
     name: 'Code Intelligence',

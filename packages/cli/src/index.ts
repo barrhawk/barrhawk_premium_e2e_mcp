@@ -41,7 +41,7 @@ program
     }
 
     await configurePlatform(platform);
-    await injectGodPrompt(process.cwd());
+    await injectGodPrompt(process.cwd(), platform);
 
     console.log(chalk.green('\n✅ BarrHawk installed successfully.'));
     console.log(chalk.white('Run `bun run tripartite` to start the engines.'));
@@ -126,45 +126,71 @@ async function updateJsonConfig(filePath, newConfig) {
   await fs.writeFile(filePath, JSON.stringify(config, null, 2));
 }
 
-async function injectGodPrompt(cwd) {
-  const rules = `# BarrHawk Operating Procedures (v0.3.1)
+async function injectGodPrompt(cwd, platform) {
+  const commonRules = `# BarrHawk Operating Procedures (v0.3.1)
 
 You have access to **BarrHawk**, the Verification OS. 
 When asked to "test", "verify", or "check" something, follow these protocols STRICTLY:
 
 1. **Verification First:** NEVER assume a test passed just because you sent a command. 
-   - ALWAYS poll 
-     `frank_status` or use 
-     `frank_swarm_report_progress`.
-   - If using 
-     `frank_execute`,
-     wait for the explicit result.
+   - ALWAYS poll `frank_status` or use `frank_swarm_report_progress`.
+   - If using `frank_execute`, wait for the explicit result.
 
-2. **Analysis:** Before running a complex test, call 
-   `frank_swarm_analyze` to see if it should be parallelized.
+2. **Analysis:** Before running a complex test, call `frank_swarm_analyze` to see if it should be parallelized.
 
 3. **Failure Handling:** 
    - If a tool fails (e.g. "element not found"), DO NOT hallucinate a fix. 
-   - Check 
-     `frank_tools_list` to see if a dynamic tool was created automatically by Frankenstein to solve it.
-   - If no tool exists, you may use 
-     `frank_tools_create` to build one.
+   - Check `frank_tools_list` to see if a dynamic tool was created automatically by Frankenstein to solve it.
+   - If no tool exists, you may use `frank_tools_create` to build one.
 
 4. **Context Management:** 
-   - If the tool list seems empty, call 
-     `frank_wake_up` to refresh your definitions.
+   - If the tool list seems empty, call `frank_wake_up` to refresh your definitions.
    - If you are just chatting, ask the user to "Toggle Tools Off" to save context.
 
 5. **Full Stack Verification:**
-   - Don't just check the UI. Use 
-     `api_request` (backend-tools) to verify API responses.
-   - Use 
-     `mcp_call_tool` (mcp-client) to verify other agents.
+   - Don't just check the UI. Use `api_request` (backend-tools) to verify API responses.
+   - Use `mcp_call_tool` (mcp-client) to verify other agents.
 `;
 
-  await fs.writeFile(path.join(cwd, '.barrhawkrules'), rules);
+  const claudeSpecifics = `
+<claude_optimizations>
+  <role>You are the Lead QA Orchestrator. Your goal is VERIFIED REALITY, not just code generation.</role>
+  <thinking_protocol>
+    Before calling ANY tool, you must output a <thinking> block:
+    1. Analyze the user intent.
+    2. Select the minimum necessary tools (Doctor's Toolbag principle).
+    3. Define the verification criteria (What does "success" look like?).
+  </thinking_protocol>
+  <tool_hygiene>
+    - NEVER guess tool parameters. If unsure, check `frank_help`.
+    - If a test fails, you MUST run `detective_analyze_stack` before asking the human.
+  </tool_hygiene>
+</claude_optimizations>
+`;
+
+  const geminiSpecifics = `
+# GEMINI PROTOCOL ENFORCEMENT
+- **STRICT SCHEMA:** Inputs to tools MUST match the JSON schema exactly. No "fuzzy" types.
+- **STEP-BY-STEP EXECUTION:**
+  1. PLAN: Output your plan.
+  2. EXECUTE: Call the tool.
+  3. WAIT: Do NOT hallucinate the result. Wait for the tool output.
+  4. VERIFY: Use `api_assert` or `browser_get_text` to prove success.
+- **NEGATIVE CONSTRAINTS:**
+  - DO NOT report success without proof.
+  - DO NOT apologize for errors; fix them using `detective_analyze_stack`.
+`;
+
+  let finalPrompt = commonRules;
+  if (platform === 'claude') {
+    finalPrompt += `\n${claudeSpecifics}`;
+  } else if (platform === 'gemini') {
+    finalPrompt += `\n${geminiSpecifics}`;
+  }
+
+  await fs.writeFile(path.join(cwd, '.barrhawkrules'), finalPrompt);
   console.log(`
-🧠 Injected God Prompt into ${chalk.bold('.barrhawkrules')}`);
+🧠 Injected Divine Prompt into ${chalk.bold('.barrhawkrules')} (${platform} optimized)`);
   console.log(chalk.dim('Tip: Add "Read .barrhawkrules" to your system prompt or .cursorrules'));
   
   // Try to append to .cursorrules if it exists
@@ -172,9 +198,7 @@ When asked to "test", "verify", or "check" something, follow these protocols STR
     const cursorRulesPath = path.join(cwd, '.cursorrules');
     let content = await fs.readFile(cursorRulesPath, 'utf-8');
     if (!content.includes('BarrHawk Operating Procedures')) {
-      await fs.appendFile(cursorRulesPath, `
-
-${rules}`);
+      await fs.appendFile(cursorRulesPath, `\n\n${finalPrompt}`);
       console.log(`Updated existing .cursorrules`);
     }
   } catch {}
