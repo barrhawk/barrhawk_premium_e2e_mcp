@@ -1,306 +1,224 @@
-# BarrHawk Premium E2E
+# BARRHAWK: VERIFY YOUR VIBECODE
+### The Operating System for Agentic Verification & Orchestration
 
-> **NOTICE** | Updated: 2026-01-28
+```
+██████╗  █████╗ ██████╗ ██████╗ ██╗  ██╗ █████╗ ██╗    ██╗██╗  ██╗
+██╔══██╗██╔══██╗██╔══██╗██╔══██╗██║  ██║██╔══██╗██║    ██║██║ ██╔╝
+██████╔╝███████║██████╔╝██████╔╝███████║███████║██║ █╗ ██║█████╔╝ 
+██╔══██╗██╔══██║██╔══██╗██╔══██╗██╔══██║██╔══██║██║███╗██║██╔═██╗ 
+██████╔╝██║  ██║██║  ██║██║  ██║██║  ██║██║  ██║╚███╔███╔╝██║  ██╗
+╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝
+                                            v0.3.1 | AI TINKERERS UPDATE
+```
+
+> **"If your Agent can't test itself, it's just a hallucination."**
 >
-> **Claude Code CLI Stability Issues**: We are experiencing intermittent hanging and freezing issues with Claude Code CLI during extended testing sessions. These are [known upstream issues](https://github.com/anthropics/claude-code/issues/13240) affecting long-running automated workflows.
->
-> **Multi-Platform Support Now Available**: BarrHawk now supports **all major AI platforms** with a unified AI backend abstraction. Switch between Claude, Gemini, OpenAI, or local Ollama with a single environment variable.
->
-> For production stability, we recommend **Gemini CLI** or **Google Antigravity** which have fewer hanging issues than Claude CLI.
+> Shout out to the **Seattle AI Tinkerers** — this one is for the builders who know that "Vibe Coding" needs "Vibe Verification."
 
 ---
 
-Self-healing MCP server with tripartite architecture, dynamic tool creation, and intelligent failure recovery.
+## 🚨 THE AI TINKERERS UPDATE (v0.3.1)
 
-## Supported Platforms
+We have evolved beyond simple browser testing. BarrHawk is now a **Full-Stack Reality Verification Engine** for your AI Agents.
 
-| Platform | Config Location | Status | Guide |
-|----------|----------------|--------|-------|
-| **Claude CLI** | `~/.claude.json` | Stable (hanging issues) | [docs/platforms/CLAUDE_CLI.md](docs/platforms/CLAUDE_CLI.md) |
-| **Gemini CLI** | `~/.gemini/settings.json` | Stable | [docs/platforms/GEMINI_CLI.md](docs/platforms/GEMINI_CLI.md) |
-| **Codex CLI** | `~/.codex/config.toml` | Stable | [docs/platforms/CODEX_CLI.md](docs/platforms/CODEX_CLI.md) |
-| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | Stable (100 tool limit) | [docs/platforms/WINDSURF.md](docs/platforms/WINDSURF.md) |
-| **Cursor** | `~/.cursor/mcp.json` | Stable | [docs/platforms/CURSOR.md](docs/platforms/CURSOR.md) |
-| **Antigravity** | `~/.antigravity/mcp_config.json` | Stable (recommended) | [docs/platforms/ANTIGRAVITY.md](docs/platforms/ANTIGRAVITY.md) |
+### New Capabilities
+*   **OS "God Mode":** Frankenstein has escaped the browser. Use `frank_os_mouse`, `frank_os_keyboard`, and `frank_os_window` to test desktop apps, extensions, and system dialogs.
+*   **Video Recording:** Full session recording for demos and debugging.
+*   **Swarm Intelligence:** Orchestrate 100s of tests using parallel "Igor" subprocesses via `frank_swarm_execute`.
+*   **Self-Healing 2.0:** We don't just find selectors; we *remember* them across sessions using the `experiencegained/` database.
 
-## Architecture Overview
+---
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                          BRIDGE (7000)                          │
-│         Message Bus | Rate Limiter | Circuit Breakers           │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-        ▼                  ▼                  ▼
-┌───────────────┐  ┌───────────────┐  ┌───────────────────┐
-│    DOCTOR     │  │     IGOR      │  │   FRANKENSTEIN    │
-│    (7001)     │  │    (7002)     │  │      (7003)       │
-│               │  │               │  │                   │
-│  Orchestrator │  │    Worker     │  │  Dynamic Tools    │
-│  Planner      │  │  Lightning    │  │  Browser Control  │
-│  Failure      │  │  Strike       │  │  Hot Reload       │
-│  Tracking     │  │  Execution    │  │  Tool Export      │
-└───────────────┘  └───────────────┘  └───────────────────┘
-```
+## 👁️ THE VISION: Why BarrHawk Exists
 
-## Quick Start
+AI Agents (Claude, Gemini, Cursor) are powerful but blind. They execute code, but they don't know if it *actually works*. They hallucinate success.
 
-### 1. Install
+**BarrHawk is the sensory cortex for your AI.**
+It provides the eyes (Screenshots/Video), the hands (Mouse/Keyboard), and the brain (Doctor/Igor) to verify that your code does what you think it does.
 
+### The SaaS Model (Coming Soon)
+We are building the infrastructure to scale this from localhost to the cloud.
+*   **Free Tier (Localhost):** You run the stack. You own the data.
+*   **Hive Mind ($20/mo):** Sync your "Experience" database. If one dev's agent fixes a selector, *everyone's* agent knows. Cloud storage for artifacts.
+*   **Swarm Cluster ($200/mo):** **The Power Proxy.** Offload the heavy lifting. Don't melt your laptop running 50 Chromes. We run the Igors and Franks in our cloud, tunneling back to your localhost.
+
+---
+
+## 🧠 THE PHILOSOPHY: "Show Your Work"
+
+**If an AI can't tell you exactly how it tested something—where it started, what state changed, and how it ended—it's just "LGTM trust me bro" vibecode.**
+
+We reject the idea that "generating code" is the goal. The goal is **Verified Reality**.
+BarrHawk is built on the belief that the only thing that matters is **Holistic, Unified Action Testing**.
+
+*   **Front-Back Unity:** We don't just click buttons. We watch the backend logs, the database state, and the network traffic simultaneously.
+*   **Reactive Intelligence:** A test isn't a script; it's a conversation with the system. If a button moves, we find it. If an API is slow, we wait. If a 500 error appears, we read the debug log to find *why*.
+*   **The "Live Postman" for Agents:** Just as you use Postman to inspect an API manually, BarrHawk is the live inspection layer for your Agent's actions.
+
+### 🔮 Coming Soon: The "Live AI Watcher"
+We are integrating a dedicated LLM observer into the Dashboard. This isn't just a log viewer; it's a second brain that watches the test execution in real-time, effectively "pair programming" with the execution agent to spot anomalies that strict assertions might miss.
+
+---
+
+## 🏛️ THE TRIPARTITE ARCHITECTURE
+
+BarrHawk is not a script. It is a **distributed system** composed of four specialized servers communicating via a high-speed WebSocket Bridge.
+
+### 1. THE BRIDGE (Port 7000) - "The Fortress"
+*   **Role:** The Nervous System.
+*   **Philosophy:** *Immortality.* The Bridge never crashes.
+*   **Tech:** WebSocket Server, Circuit Breakers, Rate Limiters, Dead Letter Queues.
+*   **Function:** Routes messages between components. If Frank dies, Bridge holds the message until he is reborn.
+
+### 2. THE DOCTOR (Port 7001) - "The Brain"
+*   **Role:** Orchestrator & Planner.
+*   **Philosophy:** *Context Compression.*
+*   **Tech:** Planner Logic, Intent Parser, Experience Engine.
+*   **Function:**
+    *   Takes a vague user request ("Check checkout").
+    *   Consults the `experiencegained` database.
+    *   Generates a precise JSON Plan.
+    *   **Critical:** Curates a specific "Tool Bag" for Igor (reducing 120 tools to 15 relevant ones) to save token costs and increase accuracy.
+
+### 3. IGOR (Port 7002) - "The Hand"
+*   **Role:** Executor & Worker.
+*   **Philosophy:** *Dual-Mode Intelligence.*
+*   **Tech:** Agent Loop, Lightning Strike System.
+*   **Modes:**
+    *   **Dumb Mode:** Fast, regex-based execution. Extremely cheap.
+    *   **Lightning Strike (Claude Mode):** If a step fails, Igor "Strikes" — elevating to a full LLM context to reason through the error, fix it, and then power down.
+
+### 4. FRANKENSTEIN (Port 7003) - "The Body"
+*   **Role:** The Toolmaker.
+*   **Philosophy:** *Dynamic Runtime.*
+*   **Tech:** Playwright, Ydotool, Grim, TypeScript Compiler.
+*   **Function:**
+    *   Controls the Browser and OS.
+    *   **Dynamic Tool Forge:** Can write and compile *new tools* at runtime to solve unforeseen problems.
+    *   **Hollow Shell:** Can "Go Dark" (unload tools) to save context window space when not in use.
+
+---
+
+## 🛠️ INSTALLATION & SETUP
+
+### Prerequisites
+*   **Bun:** `curl -fsSL https://bun.sh/install | bash`
+*   **Linux:** (Optimized for Wayland/X11). Mac/Windows support is experimental.
+
+### Quick Start
 ```bash
-git clone https://github.com/barrhawk/barrhawk_premium_e2e_mcp.git
+# 1. Clone the repo
+git clone git@github.com:barrhawk/barrhawk_premium_e2e_mcp.git
 cd barrhawk_premium_e2e_mcp
+
+# 2. Install dependencies
 bun install
-```
 
-### 2. Configure All Platforms (Automatic)
-
-```bash
+# 3. Generate MCP Configs (The "Inception" Script)
+# Automatically configures Claude, Gemini, Cursor, and Windsurf
 ./scripts/generate-mcp-configs.sh
-```
 
-This creates MCP configurations for all 6 supported platforms.
-
-### 3. Start Tripartite Stack
-
-```bash
+# 4. Start the Stack
 cd tripartite && ./start.sh
 ```
 
-### 4. Set AI Backend
+### The "War Room" Dashboard
+Open **[http://localhost:3333](http://localhost:3333)** to see the live neural activity of your swarm.
+*   **Visual Pipeline:** Watch Doctor hand plans to Igor.
+*   **Live Stream:** See what Frankenstein sees.
+*   **Holistic State:** Watch backend logs and UI changes in sync.
+*   **Token Nuke:** Toggle the "Active" switch to remove BarrHawk from your AI's context when you want to save tokens.
 
-```bash
-# Choose your backend (auto-detects from API keys if not set)
-export AI_BACKEND=gemini   # or: claude, openai, ollama
+---
 
-# Set the corresponding API key
-export GEMINI_API_KEY=your-key
-# or: ANTHROPIC_API_KEY, OPENAI_API_KEY
+## 🎮 USAGE GUIDE (For your AI)
+
+Once installed, your AI (Claude/Gemini/Cursor) will have access to these tools. **Teach your AI these patterns:**
+
+### 1. The "Do It" Command
+```javascript
+// Natural language automation
+frank_execute({
+  task: "Log into github.com and check my notifications",
+  url: "https://github.com"
+})
 ```
 
-### 5. Verify
+### 2. The "Swarm" Command (Parallel Testing)
+```javascript
+// Analyze if we need a swarm
+const analysis = frank_swarm_analyze({ intent: "Test the full checkout flow for Guest and Admin" });
 
-```bash
-curl http://localhost:7000/health  # Bridge
-curl http://localhost:7001/health  # Doctor
-curl http://localhost:7002/health  # Igor
-curl http://localhost:7003/health  # Frankenstein
+// Execute the swarm
+frank_swarm_execute({
+  intent: "Test the full checkout flow",
+  maxIgors: 4
+});
 ```
 
-### 6. Launch Dashboard (Optional)
-
-```bash
-bun run dashboard
-# Opens War Room at http://localhost:3333
+### 3. The "God Mode" Command (OS Control)
+```javascript
+// Click an extension in the Chrome toolbar
+frank_os_mouse({
+  action: "click",
+  x: 1850,
+  y: 45
+})
 ```
 
-## War Room Dashboard
+---
 
-Real-time observability dashboard for the tripartite stack.
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  BarrHawk War Room                    Bridge ● Doctor ● Igor ● Frank ●  │
-├─────────────────────────────────────────┬───────────────────────────────┤
-│                                         │  Command                      │
-│           Browser Screenshot            │  [Test the login flow...] Run │
-│           (Live from Frank)             ├───────────────────────────────┤
-│                                         │  Active Plans          [0]    │
-│                                         │  No active plans              │
-├─────────────────────────────────────────┼───────────────────────────────┤
-│  Doctor → Igor → Igor-1 → Igor-2 → Frank│  Test Results         [32]    │
-│  Plans:0   idle   idle     idle  0 tools│  ┌─────────────────────────┐  │
-├─────────────────────────────────────────┤  │ PASS  Navigate to goo.. │  │
-│ Executed │ Passed │ Failed │ Agents │ % │  │ PASS  Test login flow   │  │
-│    32    │   32   │   0    │   1    │100│  │ PASS  Click submit btn  │  │
-└─────────────────────────────────────────┴──┴─────────────────────────┴──┘
-```
-
-**Features:**
-- **Live Browser View** - Screenshots from Frankenstein in real-time
-- **Test Results** - Pass/fail badges from Bridge `/reports` with timestamps
-- **Metrics Bar** - Executed, passed, failed counts and success rate
-- **Agent Pipeline** - Visual flow of Doctor → Igor(s) → Frank
-- **Live Events** - WebSocket stream of all tripartite messages
-
-**API Endpoints:**
-| Endpoint | Description |
-|----------|-------------|
-| `GET /` | Dashboard UI |
-| `GET /health` | Component status |
-| `GET /api/state` | Full dashboard state |
-| `GET /api/reports` | Test results and stats |
-| `GET /api/screenshot` | Latest browser screenshot |
-| `POST /api/plan` | Submit test intent |
-| `WS /ws` | Real-time state updates |
-
-## AI Backend Abstraction
-
-BarrHawk's Lightning Strike feature uses a pluggable AI backend system:
+## 📂 PROJECT STRUCTURE (Deep Dive)
 
 ```
-tripartite/shared/ai-backend/
-├── index.ts      # Factory with auto-detection
-├── types.ts      # Unified interface
-├── claude.ts     # Anthropic Claude
-├── gemini.ts     # Google Gemini
-├── openai.ts     # OpenAI GPT
-└── ollama.ts     # Local Ollama
+/
+├── tripartite/               # The Core Engines
+│   ├── bridge/               # Message Bus (Port 7000)
+│   ├── doctor/               # Planner (Port 7001)
+│   ├── igor/                 # Executor (Port 7002)
+│   └── frankenstein/         # Toolmaker (Port 7003)
+│
+├── packages/                 # Shared Libraries
+│   ├── self-heal/            # Selector Strategy Engine
+│   ├── ai-backend/           # Claude/Gemini/Ollama Abstraction
+│   ├── system-tools/         # OS Automation (Mouse/Key)
+│   ├── golden/               # Visual Regression Logic
+│   └── mcp-client/           # (Coming Soon) Testing other MCPs
+│
+├── experiencegained/         # The Hive Mind Database (JSON)
+│   ├── selectors.json        # Learned selector mappings
+│   └── errors.json           # Known error patterns
+│
+└── docs/                     # Documentation
+    ├── planning/             # Future Arch (Token Nuke, Proxy)
+    └── specs/                # Component Specifications
 ```
 
-### Backend Selection
+---
 
-| AI_BACKEND | API Key Required | Best For |
-|------------|-----------------|----------|
-| `claude` | `ANTHROPIC_API_KEY` | Claude CLI users |
-| `gemini` | `GEMINI_API_KEY` | Stability, free tier |
-| `openai` | `OPENAI_API_KEY` | Codex CLI users |
-| `ollama` | None (local) | Offline, privacy |
+## 🔮 ROADMAP: The Road to 100 Stars
 
-Auto-detection priority: `AI_BACKEND` env → first available API key → ollama
+We are actively building the connective tissue to make this a seamless SaaS product.
 
-## Key Features
+### Phase 1: Connective Tissue (Current)
+- [ ] **`barrhawk init`**: A unified installer that detects your IDE/CLI and injects the "God Prompt" rules file (`.barrhawkrules`).
+- [ ] **Token Nuke:** Fully implementing the "Hollow Shell" pattern to toggle tool visibility on demand.
 
-### Failure→Create Flow
-When tests fail repeatedly at the same point, Doctor automatically requests Frankenstein to generate a specialized tool to handle that scenario.
+### Phase 2: The SaaS Layer (Next)
+- [ ] **Cloud Experience Sync:** Upload your local `experiencegained` to the cloud to share with your team.
+- [ ] **The BarrHawk Proxy:** A secure gateway allowing Tier 3 users to leverage Enterprise-grade AI rate limits via Igor.
 
-### Lightning Strike
-Igor starts in "dumb" mode (fast pattern matching). After consecutive failures, it escalates to AI-powered reasoning (using your configured backend), then returns to dumb mode after success.
+### Phase 3: The Universal Standard
+- [ ] **MCP Client Tools:** Enabling Igor to connect to *other* MCP servers and verify *their* behavior.
 
-### Swarm Mode
-Parallel testing with multiple Igor agents:
-```
-frank_swarm_execute with intent: "Test login, cart, checkout, profile"
-```
+---
 
-## MCP Tools
+## 🤝 CONTRIBUTING
 
-### Frank Integration Tools
-| Tool | Description |
-|------|-------------|
-| `frank_execute` | Natural language browser automation |
-| `frank_screenshot` | Capture current browser state |
-| `frank_browser_*` | Direct browser control (launch, navigate, click, type) |
-| `frank_swarm_execute` | Parallel multi-agent testing |
-| `frank_swarm_analyze` | Analyze task for optimal routing |
-| `frank_tools_create` | Create tools at runtime |
-| `frank_lightning_strike` | Manual AI escalation |
+We are open source. We are building the future of AI verification.
 
-### Beta Tools (43 total)
-- **Assertions**: `assert_equals`, `assert_contains`, `assert_truthy`, `assert_type`, `assert_range`, `assert_json_schema`
-- **Data Generation**: `data_generate`, `data_edge_cases`, `data_from_schema`
-- **Test Analysis**: `test_flaky_detect`, `test_prioritize`, `test_deduplicate`, `test_coverage_gaps`
-- **Reporting**: `report_summary`, `report_failures`, `report_timing`
-- **Utilities**: `timestamp_now`, `date_utils`, `wait_ms`, `random_choice`, `math_stats`
-- **Meta**: `dynamic_tool_create`, `worker_status`, `worker_restart`, `worker_snapshot`
+*   **Repo:** `github.com/barrhawk/barrhawk_premium_e2e_mcp`
+*   **Push Access:** Ask Sparrow.
+*   **Issues:** Use the Issue Tracker.
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [INSTALL.md](INSTALL.md) | Installation and setup guide |
-| [CHANGELOG.md](CHANGELOG.md) | Version history and changes |
-| [docs/platforms/](docs/platforms/) | **Platform-specific setup guides** |
-| [docs/BETA_PRE_RELEASE.md](docs/BETA_PRE_RELEASE.md) | Current release details |
-| [docs/FRANKENSTACK_GUIDE.md](docs/FRANKENSTACK_GUIDE.md) | Architecture deep-dive |
-| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Complete API documentation |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
-| [tripartite/README.md](tripartite/README.md) | Tripartite component guide |
-
-## Scripts
-
-```bash
-# Setup
-./scripts/generate-mcp-configs.sh  # Generate configs for all platforms
-
-# Tripartite (recommended)
-bun run tripartite           # Start full stack
-bun run tripartite:bridge    # Start Bridge only
-bun run tripartite:doctor    # Start Doctor only
-bun run tripartite:igor      # Start Igor only
-bun run tripartite:frank     # Start Frankenstein only
-bun run mcp:frank            # Start MCP-Frank server
-bun run dashboard            # Start War Room dashboard (port 3333)
-
-# Beta (legacy two-tier)
-bun run beta                 # Start Primary
-bun run beta:secondary       # Start Secondary
-bun run beta:test            # Run test suite
-```
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AI_BACKEND` | auto | AI provider: `claude`, `gemini`, `openai`, `ollama` |
-| `ANTHROPIC_API_KEY` | - | For Claude backend |
-| `GEMINI_API_KEY` | - | For Gemini backend |
-| `OPENAI_API_KEY` | - | For OpenAI backend |
-| `OLLAMA_URL` | localhost:11434 | For Ollama backend |
-| `BRIDGE_PORT` | 7000 | Bridge HTTP port |
-| `DOCTOR_PORT` | 7001 | Doctor HTTP port |
-| `IGOR_PORT` | 7002 | Igor HTTP port |
-| `FRANK_PORT` | 7003 | Frankenstein HTTP port |
-| `DASHBOARD_PORT` | 3333 | War Room dashboard port |
-
-## Status
-
-| Component | Version | Status |
-|-----------|---------|--------|
-| Bridge | v11 | Stable |
-| Doctor | v16 | Stable |
-| Igor | v15 | Stable |
-| Frankenstein | v8 | Stable |
-| AI Backend (Claude) | v1 | Stable |
-| AI Backend (Gemini) | v1 | Stable |
-| AI Backend (OpenAI) | v1 | Stable |
-| AI Backend (Ollama) | v1 | Stable |
-
-## Platform Recommendations
-
-| Use Case | Recommended Platform |
-|----------|---------------------|
-| **Stability** | Gemini CLI, Antigravity |
-| **Free tier** | Antigravity (thousands of requests/day) |
-| **Team sharing** | Cursor, Windsurf |
-| **Multi-agent** | Antigravity (Manager Surface) |
-| **Offline** | Any platform + Ollama backend |
-
-## Packages
-
-| Package | Description |
-|---------|-------------|
-| `packages/ai-tools` | AI-powered test analysis, accessibility audits, failure analysis, test generation |
-| `packages/browser` | Browser state management for Playwright integration |
-| `packages/dashboard-min` | War Room dashboard with test reports, live browser view, metrics |
-| `packages/events` | Event emitter, persistence, and transport layer |
-| `packages/free-tools` | Free tier tools: assertions, data generation, reporting, security scanning |
-| `packages/observability` | Metrics dashboard, CLI viewer, and test integration |
-| `packages/self-heal` | Self-healing selector strategies (ID, CSS path, ARIA, text, data-testid) |
-| `packages/supervisor` | Legacy two-tier supervisor with primary/secondary architecture |
-| `packages/testing` | Test utilities and model context verification |
-| `packages/types` | Shared TypeScript type definitions |
-
-### Package Usage
-
-```typescript
-// AI-powered test analysis
-import { analyzeFailure, suggestFix, generateTests } from './packages/ai-tools/src';
-
-// Self-healing selectors
-import { Healer } from './packages/self-heal';
-const healer = new Healer();
-const element = await healer.find(page, originalSelector);
-
-// Free tools for assertions
-import { assertEquals, assertContains } from './packages/free-tools/src/assertions';
-
-// Event system
-import { EventEmitter } from './packages/events';
-```
-
-## License
-
-[Elastic License 2.0](LICENSE)
+> **"Trust, but Verify."** — BarrHawk
