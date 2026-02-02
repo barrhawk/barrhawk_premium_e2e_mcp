@@ -31,6 +31,12 @@ export type ToolCategory =
   | 'psych_ward'        // psych_ward_prompt
   | 'ai_critic'         // critic_review
   | 'ai_genesis'        // genesis_fix
+  | 'saboteur'          // throttle
+  | 'warden'            // k8s, aws
+  | 'necromancer'       // har replay
+  | 'mailman'           // email
+  | 'chronos'           // time travel
+  | 'intercom'          // human ask
   | 'code_intelligence' // detective_analyze, bisect
   | 'assertions'        // assert_equals, assert_contains, assert_visible
   | 'ai_analysis'       // smart_assert, analyze_failure, suggest_fix
@@ -439,6 +445,161 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         badCommit: { type: 'string', default: 'HEAD' },
       },
       required: ['testCommand', 'goodCommit'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // THE SABOTEUR (Network Chaos)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'saboteur_throttle',
+    description: 'Simulate network conditions (3G, Offline, Latency).',
+    category: 'saboteur',
+    tags: ['network', 'slow', 'offline', '3g', 'latency', 'throttle'],
+    weight: 85,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        preset: { type: 'string', enum: ['3g', '4g', 'offline', 'custom'] },
+        custom: {
+          type: 'object',
+          properties: {
+            latency: { type: 'number' },
+            throughput: { type: 'number' },
+          },
+        },
+      },
+      required: ['preset'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // THE WARDEN (Infrastructure)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'warden_k8s_check',
+    description: 'Check status of a Kubernetes resource.',
+    category: 'warden',
+    tags: ['k8s', 'kubernetes', 'pod', 'service', 'check', 'status'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', default: 'pod' },
+        name: { type: 'string' },
+        namespace: { type: 'string', default: 'default' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'warden_aws_check',
+    description: 'Check AWS resource properties (e.g. S3 bucket privacy).',
+    category: 'warden',
+    tags: ['aws', 'cloud', 's3', 'check', 'security', 'bucket'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', enum: ['s3'], default: 's3' },
+        resource: { type: 'string' },
+        check: { type: 'string', enum: ['is_public'], default: 'is_public' },
+      },
+      required: ['resource'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // THE MAILMAN (Email/SMS)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'mailman_start',
+    description: 'Start local SMTP server to catch emails.',
+    category: 'mailman',
+    tags: ['email', 'smtp', 'start', 'listen', 'server'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number', default: 1025 },
+      },
+    },
+  },
+  {
+    name: 'mailman_check',
+    description: 'Check inbox for emails matching filter.',
+    category: 'mailman',
+    tags: ['email', 'check', 'read', 'inbox', 'find'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string' },
+        subject: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'mailman_clear',
+    description: 'Clear the email inbox.',
+    category: 'mailman',
+    tags: ['email', 'clear', 'delete', 'reset'],
+    weight: 60,
+    inputSchema: { type: 'object', properties: {} },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CHRONOS (Time Travel)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'chronos_timetravel',
+    description: 'Manipulate browser time (Date object).',
+    category: 'chronos',
+    tags: ['time', 'date', 'travel', 'mock', 'clock'],
+    weight: 80,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'ISO Date string' },
+      },
+      required: ['date'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // INTERCOM (Human-in-the-Loop)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'intercom_ask',
+    description: 'Pause execution and ask the human operator a question.',
+    category: 'intercom',
+    tags: ['human', 'ask', 'pause', 'help', 'input'],
+    weight: 95,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        timeout: { type: 'number', default: 300000 },
+      },
+      required: ['question'],
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // THE NECROMANCER (Traffic Replay)
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'necromancer_replay',
+    description: 'Generate a test plan by replaying traffic from a HAR file.',
+    category: 'necromancer',
+    tags: ['har', 'replay', 'traffic', 'generate', 'api', 'mock'],
+    weight: 90,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        harFile: { type: 'string' },
+      },
+      required: ['harFile'],
     },
   },
 
@@ -1351,6 +1512,36 @@ export const CATEGORY_INFO: Record<ToolCategory, {
     name: 'Project Genesis',
     description: 'Self-healing code generation loops',
     keywords: ['fix', 'repair', 'code', 'generate', 'tdd'],
+  },
+  saboteur: {
+    name: 'The Saboteur',
+    description: 'Network chaos and throttling',
+    keywords: ['network', 'slow', 'offline', 'chaos'],
+  },
+  warden: {
+    name: 'The Warden',
+    description: 'Infrastructure verification (K8s/AWS)',
+    keywords: ['cloud', 'infra', 'aws', 'k8s', 'security'],
+  },
+  necromancer: {
+    name: 'The Necromancer',
+    description: 'Traffic replay and test generation from logs',
+    keywords: ['har', 'replay', 'traffic', 'generate'],
+  },
+  mailman: {
+    name: 'The Mailman',
+    description: 'Email/SMTP interception and verification',
+    keywords: ['email', 'smtp', 'inbox', 'mail'],
+  },
+  chronos: {
+    name: 'Chronos',
+    description: 'Time manipulation and mocking',
+    keywords: ['time', 'date', 'clock', 'wait'],
+  },
+  intercom: {
+    name: 'Intercom',
+    description: 'Human-in-the-loop interactions',
+    keywords: ['human', 'ask', 'help', 'pause'],
   },
   code_intelligence: {
     name: 'Code Intelligence',

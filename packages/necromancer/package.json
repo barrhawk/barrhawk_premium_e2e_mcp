@@ -1,0 +1,9 @@
+{
+  "name": "@barrhawk/necromancer",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "type": "module",
+  "dependencies": {
+    "fs-extra": "^11.0.0"
+  }
+}
