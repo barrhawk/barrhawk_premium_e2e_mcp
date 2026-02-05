@@ -38,14 +38,17 @@ import {
   stopHeadlessRecording,
 } from './frankenstein/desktop-recorder.js';
 import {
-  runIntelligentLoop,
-  stopIntelligentLoop,
+  startLoop,
+  continueLoop,
+  stopLoop,
   getLoopStatus,
-  analyzeState,
+  captureForAnalysis,
+  executeAction,
+  type LoopAction,
 } from './frankenstein/intelligent-loop.js';
 import { takeScreenshot } from './frankenstein/system-tools.js';
 
-const VERSION = '2026-02-05-v5-desktop-recording-intelligent-loop';
+const VERSION = '2026-02-05-v6-callback-architecture';
 const BRIDGE_URL = process.env.BRIDGE_URL || 'ws://localhost:7000';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3333';
 
@@ -915,59 +918,91 @@ const TOOLS: Tool[] = [
     },
   },
   // ─────────────────────────────────────────────────────────────────────────────
-  // INTELLIGENT LOOP - AI-driven E2E testing
+  // INTELLIGENT LOOP - AI-driven E2E testing (Callback Architecture)
+  // Claude Code itself provides the intelligence - no separate API key needed.
   // ─────────────────────────────────────────────────────────────────────────────
   {
-    name: 'frank_intelligent_test',
-    description: 'Run an AI-driven E2E test. Takes a goal description, then iteratively: screenshots the screen, analyzes with Claude vision, decides and executes the next action. Continues until goal is achieved or max iterations reached.',
+    name: 'frank_loop_start',
+    description: `Start an AI-driven E2E test loop. Returns a screenshot for YOU (Claude) to analyze.
+
+WORKFLOW:
+1. Call frank_loop_start with goal - returns screenshot
+2. YOU analyze the screenshot and decide the next action
+3. Call frank_loop_continue with your action - executes and returns next screenshot
+4. Repeat steps 2-3 until you decide the goal is achieved (action type: "done")
+
+This uses YOUR intelligence to drive the loop - no separate API key needed.`,
     inputSchema: {
       type: 'object',
       properties: {
         goal: {
           type: 'string',
-          description: 'Natural language description of the test goal (e.g., "Navigate to Medicare.gov and compare three Part D plans")',
+          description: 'Natural language description of the test goal',
         },
         successCriteria: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional list of specific success criteria to check',
+          description: 'Optional list of specific success criteria',
         },
         maxIterations: {
           type: 'number',
-          description: 'Maximum number of think-act iterations (default: 30)',
+          description: 'Maximum iterations (default: 30)',
         },
         timeoutMs: {
           type: 'number',
-          description: 'Timeout in milliseconds (default: 180000 = 3 minutes)',
-        },
-        screenshotDir: {
-          type: 'string',
-          description: 'Directory to save step screenshots (default: /tmp/intelligent-loop)',
+          description: 'Timeout in ms (default: 180000)',
         },
       },
       required: ['goal'],
     },
   },
   {
-    name: 'frank_intelligent_analyze',
-    description: 'Analyze a single screenshot and get AI-recommended next action. Useful for step-by-step manual control with AI guidance.',
+    name: 'frank_loop_continue',
+    description: `Continue the intelligent loop with your decided action. Executes the action and returns the next screenshot.
+
+ACTION TYPES:
+- click: { x: number, y: number, button?: "left"|"right" }
+- type: { text: string }
+- press_key: { key: string, modifiers?: string[] }
+- scroll: { direction: "up"|"down", amount?: number }
+- wait: { ms: number }
+- focus_window: { name: string }
+- done: { success: boolean, message: string } - ENDS THE LOOP
+- error: { message: string } - ENDS THE LOOP WITH FAILURE
+
+Analyze the previous screenshot and provide the appropriate action.`,
     inputSchema: {
       type: 'object',
       properties: {
-        context: {
+        sessionId: {
           type: 'string',
-          description: 'Description of what you are trying to do',
+          description: 'Session ID from frank_loop_start',
         },
-        screenshotBase64: {
-          type: 'string',
-          description: 'Base64-encoded screenshot to analyze. If not provided, takes a fresh OS screenshot.',
+        action: {
+          type: 'object',
+          description: 'The action to execute',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['click', 'type', 'press_key', 'scroll', 'wait', 'focus_window', 'done', 'error'],
+            },
+            params: {
+              type: 'object',
+              description: 'Action parameters (varies by type)',
+            },
+            reasoning: {
+              type: 'string',
+              description: 'Brief explanation of why this action',
+            },
+          },
+          required: ['type'],
         },
       },
-      required: ['context'],
+      required: ['sessionId', 'action'],
     },
   },
   {
-    name: 'frank_intelligent_status',
+    name: 'frank_loop_status',
     description: 'Get the status of the current intelligent loop session.',
     inputSchema: {
       type: 'object',
@@ -975,11 +1010,49 @@ const TOOLS: Tool[] = [
     },
   },
   {
-    name: 'frank_intelligent_stop',
+    name: 'frank_loop_stop',
     description: 'Stop the current intelligent loop session.',
     inputSchema: {
       type: 'object',
       properties: {},
+    },
+  },
+  {
+    name: 'frank_capture',
+    description: 'Take a screenshot and get a prompt for analyzing it. Use this for one-off analysis without starting a loop.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        context: {
+          type: 'string',
+          description: 'What you are trying to achieve (used to generate analysis prompt)',
+        },
+      },
+      required: ['context'],
+    },
+  },
+  {
+    name: 'frank_action',
+    description: 'Execute a single action without being in a loop. Useful for quick one-off actions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'object',
+          description: 'The action to execute',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['click', 'type', 'press_key', 'scroll', 'wait', 'focus_window'],
+            },
+            params: {
+              type: 'object',
+            },
+          },
+          required: ['type'],
+        },
+      },
+      required: ['action'],
     },
   },
 ];
@@ -1472,65 +1545,138 @@ ${dashboardReported ? `View live progress: ${DASHBOARD_URL}` : 'Dashboard not av
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Intelligent Loop Handlers
+    // Intelligent Loop Handlers (Callback Architecture)
+    // Claude Code provides the intelligence - no separate API key needed
     // ─────────────────────────────────────────────────────────────────────────────
-    case 'frank_intelligent_test': {
+    case 'frank_loop_start': {
       try {
         const goal = args.goal as string;
-        const session = await runIntelligentLoop({
-          goal: {
-            description: goal,
-            successCriteria: args.successCriteria as string[] | undefined,
-            maxIterations: args.maxIterations as number | undefined,
-            timeoutMs: args.timeoutMs as number | undefined,
-          },
-          screenshotDir: args.screenshotDir as string | undefined,
+        const result = await startLoop({
+          description: goal,
+          successCriteria: args.successCriteria as string[] | undefined,
+          maxIterations: args.maxIterations as number | undefined,
+          timeoutMs: args.timeoutMs as number | undefined,
         });
+
         return {
-          success: session.status === 'success',
-          session,
-          status: session.status,
-          steps: session.steps.length,
-          finalAnalysis: session.finalAnalysis,
+          sessionId: result.sessionId,
+          iteration: result.iteration,
+          goal: result.goal,
+          screenshot: {
+            path: result.screenshot.path,
+            // Return base64 for Claude to analyze visually
+            base64: result.screenshot.base64,
+          },
+          instructions: `
+ANALYZE THE SCREENSHOT ABOVE and decide the next action.
+
+Goal: ${goal}
+${result.goal.successCriteria ? `Success Criteria:\n${result.goal.successCriteria.map(c => `- ${c}`).join('\n')}` : ''}
+
+Then call frank_loop_continue with:
+- sessionId: "${result.sessionId}"
+- action: { type: "...", params: {...}, reasoning: "..." }
+
+Action types:
+- click: { x, y, button? }
+- type: { text }
+- press_key: { key, modifiers? }
+- scroll: { direction, amount? }
+- wait: { ms }
+- focus_window: { name }
+- done: { success: true/false, message } - when goal achieved
+- error: { message } - if stuck
+          `.trim(),
         };
       } catch (error: any) {
         return { error: error.message };
       }
     }
 
-    case 'frank_intelligent_analyze': {
+    case 'frank_loop_continue': {
       try {
-        let screenshotBase64 = args.screenshotBase64 as string | undefined;
+        const sessionId = args.sessionId as string;
+        const action = args.action as LoopAction;
 
-        // Take a screenshot if not provided
-        if (!screenshotBase64) {
-          const screenshot = await takeScreenshot({});
-          screenshotBase64 = screenshot.base64;
+        const result = await continueLoop(sessionId, action);
+
+        if (result.status === 'awaiting_action' && result.screenshot) {
+          return {
+            sessionId: result.sessionId,
+            iteration: result.iteration,
+            status: result.status,
+            previousSteps: result.previousSteps.length,
+            screenshot: {
+              path: result.screenshot.path,
+              base64: result.screenshot.base64,
+            },
+            instructions: `
+ANALYZE THE SCREENSHOT ABOVE and decide the next action.
+Iteration ${result.iteration} - Previous steps: ${result.previousSteps.length}
+
+Call frank_loop_continue again with your next action, or use type "done" to finish.
+            `.trim(),
+          };
+        } else {
+          // Loop ended
+          return {
+            sessionId: result.sessionId,
+            iteration: result.iteration,
+            status: result.status,
+            finalAnalysis: result.finalAnalysis,
+            totalSteps: result.previousSteps.length,
+            result: result.result,
+            error: result.error,
+          };
         }
-
-        const context = args.context as string;
-        const action = await analyzeState(screenshotBase64, context);
-        return {
-          success: true,
-          action,
-          reasoning: action.reasoning,
-        };
       } catch (error: any) {
         return { error: error.message };
       }
     }
 
-    case 'frank_intelligent_status': {
+    case 'frank_loop_status': {
       const status = getLoopStatus();
       return status || { running: false, message: 'No active intelligent loop' };
     }
 
-    case 'frank_intelligent_stop': {
+    case 'frank_loop_stop': {
       try {
-        const session = await stopIntelligentLoop();
+        const session = await stopLoop();
         return session
           ? { success: true, session, message: 'Intelligent loop stopped' }
           : { success: false, message: 'No active loop to stop' };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_capture': {
+      try {
+        const context = args.context as string;
+        const result = await captureForAnalysis(context);
+        return {
+          screenshot: {
+            path: result.screenshot.path,
+            base64: result.screenshot.base64,
+          },
+          context: result.context,
+          prompt: result.prompt,
+          instructions: 'Analyze the screenshot and use frank_action to execute actions.',
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_action': {
+      try {
+        const action = args.action as LoopAction;
+        const result = await executeAction(action);
+        return {
+          success: true,
+          action: action.type,
+          result,
+        };
       } catch (error: any) {
         return { error: error.message };
       }

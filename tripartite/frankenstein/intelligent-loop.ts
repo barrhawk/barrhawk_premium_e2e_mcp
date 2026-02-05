@@ -1,23 +1,24 @@
 /**
- * INTELLIGENT LOOP - AI-driven E2E testing
+ * INTELLIGENT LOOP - AI-driven E2E testing (Callback Architecture)
  *
- * Implements the think-act-observe loop:
+ * This version uses a callback pattern where Claude Code does the analysis.
+ * Instead of calling the Anthropic API directly, it:
  * 1. OBSERVE: Take screenshot of current state
- * 2. THINK: Send to Claude to analyze and decide next action
- * 3. ACT: Execute the decided action
- * 4. REPEAT: Until goal achieved or max iterations
+ * 2. YIELD: Return screenshot to Claude Code for analysis
+ * 3. RECEIVE: Get action from Claude Code
+ * 4. ACT: Execute the action
+ * 5. REPEAT: Until goal achieved or max iterations
  *
- * This enables truly intelligent, adaptive E2E testing that can handle
- * dynamic UIs, unexpected states, and complex multi-step workflows.
+ * This allows the intelligent loop to work through MCP without needing
+ * a separate API key - Claude Code itself provides the intelligence.
  */
 
 import { createLogger } from '../shared/logger.js';
 import { takeScreenshot, mouseClick, typeText, pressKey, listWindows, focusWindow } from './system-tools.js';
-import Anthropic from '@anthropic-ai/sdk';
 
 const logger = createLogger({
   component: 'intelligent-loop',
-  version: '1.0.0',
+  version: '2.0.0-callback',
   minLevel: 'INFO',
   pretty: true,
 });
@@ -43,6 +44,7 @@ export interface LoopStep {
   iteration: number;
   timestamp: number;
   screenshotPath?: string;
+  screenshotBase64?: string;
   analysis?: string;
   action: LoopAction;
   result?: any;
@@ -54,18 +56,14 @@ export interface LoopSession {
   goal: LoopGoal;
   startTime: number;
   endTime?: number;
-  status: 'running' | 'success' | 'failed' | 'timeout' | 'max_iterations';
+  status: 'running' | 'awaiting_action' | 'success' | 'failed' | 'timeout' | 'max_iterations';
   steps: LoopStep[];
   finalAnalysis?: string;
-}
-
-export interface LoopOptions {
-  goal: LoopGoal;
-  anthropicApiKey?: string;
-  model?: string;
-  screenshotDir?: string;
-  onStep?: (step: LoopStep) => void;
-  browserContext?: any;  // Playwright browser context for hybrid mode
+  currentIteration: number;
+  pendingScreenshot?: {
+    base64: string;
+    path: string;
+  };
 }
 
 // =============================================================================
@@ -73,119 +71,12 @@ export interface LoopOptions {
 // =============================================================================
 
 let currentSession: LoopSession | null = null;
-let anthropicClient: Anthropic | null = null;
-
-// =============================================================================
-// Claude Integration
-// =============================================================================
-
-function getAnthropicClient(apiKey?: string): Anthropic {
-  if (anthropicClient) return anthropicClient;
-
-  const key = apiKey || process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    throw new Error('ANTHROPIC_API_KEY not set. Required for intelligent loop.');
-  }
-
-  anthropicClient = new Anthropic({ apiKey: key });
-  return anthropicClient;
-}
-
-async function analyzeScreenshot(
-  screenshotBase64: string,
-  goal: LoopGoal,
-  previousSteps: LoopStep[],
-  client: Anthropic,
-  model: string
-): Promise<LoopAction> {
-  const systemPrompt = `You are an AI assistant helping with E2E testing. You analyze screenshots and decide what action to take next.
-
-Your goal: ${goal.description}
-${goal.successCriteria ? `Success criteria:\n${goal.successCriteria.map(c => `- ${c}`).join('\n')}` : ''}
-
-You must respond with a JSON object describing the next action:
-{
-  "type": "click" | "type" | "press_key" | "scroll" | "wait" | "focus_window" | "done" | "error",
-  "params": { ... },  // Parameters for the action
-  "reasoning": "..."  // Brief explanation of why this action
-}
-
-Action types:
-- click: { "x": number, "y": number, "button": "left"|"right" }
-- type: { "text": "string to type" }
-- press_key: { "key": "Enter"|"Tab"|"Escape"|etc, "modifiers": ["ctrl", "shift"] }
-- scroll: { "direction": "up"|"down", "amount": 300 }
-- wait: { "ms": 1000 }
-- focus_window: { "name": "window name pattern" }
-- done: { "success": true, "message": "Goal achieved because..." }
-- error: { "message": "Cannot proceed because..." }
-
-Be precise with click coordinates - analyze the UI elements carefully.
-If the goal appears to be achieved, return type "done".
-If you cannot make progress, return type "error".`;
-
-  const previousContext = previousSteps.length > 0
-    ? `\n\nPrevious ${previousSteps.length} steps:\n${previousSteps.slice(-5).map((s, i) =>
-        `${i + 1}. ${s.action.type}: ${s.action.reasoning || JSON.stringify(s.action.params)}`
-      ).join('\n')}`
-    : '';
-
-  try {
-    const response = await client.messages.create({
-      model,
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/png',
-                data: screenshotBase64,
-              },
-            },
-            {
-              type: 'text',
-              text: `Analyze this screenshot and decide the next action to achieve the goal.${previousContext}\n\nRespond with JSON only.`,
-            },
-          ],
-        },
-      ],
-      system: systemPrompt,
-    });
-
-    // Extract JSON from response
-    const content = response.content[0];
-    if (content.type !== 'text') {
-      throw new Error('Unexpected response type');
-    }
-
-    // Parse JSON (handle potential markdown code blocks)
-    let jsonStr = content.text.trim();
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-    }
-
-    const action = JSON.parse(jsonStr) as LoopAction;
-    return action;
-
-  } catch (error: any) {
-    logger.error('Failed to analyze screenshot:', error);
-    return {
-      type: 'error',
-      params: { message: `Analysis failed: ${error.message}` },
-      reasoning: 'Claude API error',
-    };
-  }
-}
 
 // =============================================================================
 // Action Execution
 // =============================================================================
 
-async function executeAction(action: LoopAction): Promise<any> {
+export async function executeAction(action: LoopAction): Promise<any> {
   logger.info(`Executing action: ${action.type}`, action.params);
 
   switch (action.type) {
@@ -209,8 +100,6 @@ async function executeAction(action: LoopAction): Promise<any> {
 
     case 'scroll': {
       const { direction, amount } = action.params || {};
-      // Use xdotool for scrolling
-      const scrollAmount = direction === 'up' ? -amount : amount;
       const proc = Bun.spawn(['xdotool', 'click', direction === 'up' ? '4' : '5'], {
         stdout: 'pipe',
         stderr: 'pipe',
@@ -253,20 +142,32 @@ async function executeAction(action: LoopAction): Promise<any> {
 }
 
 // =============================================================================
-// Main Loop
+// Loop Management - Callback Architecture
 // =============================================================================
 
-export async function runIntelligentLoop(options: LoopOptions): Promise<LoopSession> {
-  if (currentSession?.status === 'running') {
-    throw new Error('Loop already running. Stop it first.');
+/**
+ * Start a new intelligent loop session.
+ * Returns immediately with the first screenshot for Claude Code to analyze.
+ */
+export async function startLoop(goal: LoopGoal, screenshotDir = '/tmp/intelligent-loop'): Promise<{
+  sessionId: string;
+  iteration: number;
+  screenshot: { base64: string; path: string };
+  goal: LoopGoal;
+  previousSteps: LoopStep[];
+}> {
+  if (currentSession?.status === 'running' || currentSession?.status === 'awaiting_action') {
+    throw new Error('Loop already running. Stop it first or provide the next action.');
   }
 
-  const { goal, anthropicApiKey, model = 'claude-sonnet-4-20250514', screenshotDir = '/tmp/intelligent-loop', onStep } = options;
-  const maxIterations = goal.maxIterations || 50;
-  const timeoutMs = goal.timeoutMs || 300000; // 5 minutes default
-
-  const client = getAnthropicClient(anthropicApiKey);
   const id = `loop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const maxIterations = goal.maxIterations || 50;
+
+  // Ensure screenshot directory exists
+  const { mkdirSync, existsSync } = await import('fs');
+  if (!existsSync(screenshotDir)) {
+    mkdirSync(screenshotDir, { recursive: true });
+  }
 
   currentSession = {
     id,
@@ -274,119 +175,191 @@ export async function runIntelligentLoop(options: LoopOptions): Promise<LoopSess
     startTime: Date.now(),
     status: 'running',
     steps: [],
+    currentIteration: 1,
   };
 
   logger.info(`Starting intelligent loop: ${id}`);
   logger.info(`Goal: ${goal.description}`);
-  logger.info(`Max iterations: ${maxIterations}, Timeout: ${timeoutMs}ms`);
+  logger.info(`Max iterations: ${maxIterations}`);
 
-  const startTime = Date.now();
+  // Take initial screenshot
+  const screenshotPath = `${screenshotDir}/step_1_${Date.now()}.png`;
+  const screenshot = await takeScreenshot({ output: screenshotPath });
 
-  try {
-    for (let iteration = 1; iteration <= maxIterations; iteration++) {
-      // Check timeout
-      if (Date.now() - startTime > timeoutMs) {
-        currentSession.status = 'timeout';
-        currentSession.finalAnalysis = `Timed out after ${timeoutMs}ms`;
-        break;
-      }
+  currentSession.status = 'awaiting_action';
+  currentSession.pendingScreenshot = {
+    base64: screenshot.base64,
+    path: screenshotPath,
+  };
 
-      logger.info(`\n=== Iteration ${iteration}/${maxIterations} ===`);
-
-      // 1. OBSERVE: Take screenshot
-      const screenshotPath = `${screenshotDir}/step_${iteration}_${Date.now()}.png`;
-      const screenshot = await takeScreenshot({ output: screenshotPath });
-
-      // 2. THINK: Analyze with Claude
-      const action = await analyzeScreenshot(
-        screenshot.base64,
-        goal,
-        currentSession.steps,
-        client,
-        model
-      );
-
-      logger.info(`Action decided: ${action.type} - ${action.reasoning}`);
-
-      const step: LoopStep = {
-        iteration,
-        timestamp: Date.now(),
-        screenshotPath,
-        analysis: action.reasoning,
-        action,
-      };
-
-      // 3. ACT: Execute the action
-      try {
-        if (action.type === 'done') {
-          step.result = action.params;
-          currentSession.steps.push(step);
-          currentSession.status = action.params?.success ? 'success' : 'failed';
-          currentSession.finalAnalysis = action.params?.message;
-
-          if (onStep) onStep(step);
-          break;
-        }
-
-        if (action.type === 'error') {
-          step.error = action.params?.message;
-          currentSession.steps.push(step);
-          currentSession.status = 'failed';
-          currentSession.finalAnalysis = action.params?.message;
-
-          if (onStep) onStep(step);
-          break;
-        }
-
-        step.result = await executeAction(action);
-        currentSession.steps.push(step);
-
-        if (onStep) onStep(step);
-
-        // Small delay between actions
-        await new Promise(r => setTimeout(r, 500));
-
-      } catch (error: any) {
-        step.error = error.message;
-        currentSession.steps.push(step);
-        logger.error(`Action failed: ${error.message}`);
-
-        if (onStep) onStep(step);
-
-        // Continue trying unless it's a critical error
-        if (iteration >= maxIterations - 1) {
-          currentSession.status = 'failed';
-          currentSession.finalAnalysis = `Failed after ${iteration} iterations: ${error.message}`;
-        }
-      }
-    }
-
-    if (currentSession.status === 'running') {
-      currentSession.status = 'max_iterations';
-      currentSession.finalAnalysis = `Reached max iterations (${maxIterations}) without completing goal`;
-    }
-
-  } catch (error: any) {
-    currentSession.status = 'failed';
-    currentSession.finalAnalysis = `Loop error: ${error.message}`;
-    logger.error('Loop failed:', error);
-  }
-
-  currentSession.endTime = Date.now();
-
-  const duration = (currentSession.endTime - currentSession.startTime) / 1000;
-  logger.info(`\n=== Loop Complete ===`);
-  logger.info(`Status: ${currentSession.status}`);
-  logger.info(`Duration: ${duration}s`);
-  logger.info(`Steps: ${currentSession.steps.length}`);
-  logger.info(`Final: ${currentSession.finalAnalysis}`);
-
-  const result = { ...currentSession };
-  currentSession = null;
-  return result;
+  return {
+    sessionId: id,
+    iteration: 1,
+    screenshot: { base64: screenshot.base64, path: screenshotPath },
+    goal,
+    previousSteps: [],
+  };
 }
 
-export async function stopIntelligentLoop(): Promise<LoopSession | null> {
+/**
+ * Continue the loop with an action from Claude Code.
+ * Executes the action and returns the next screenshot (or completion status).
+ */
+export async function continueLoop(
+  sessionId: string,
+  action: LoopAction,
+  screenshotDir = '/tmp/intelligent-loop'
+): Promise<{
+  sessionId: string;
+  iteration: number;
+  status: LoopSession['status'];
+  screenshot?: { base64: string; path: string };
+  result?: any;
+  error?: string;
+  previousSteps: LoopStep[];
+  finalAnalysis?: string;
+}> {
+  if (!currentSession || currentSession.id !== sessionId) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  if (currentSession.status !== 'awaiting_action') {
+    throw new Error(`Session not awaiting action. Status: ${currentSession.status}`);
+  }
+
+  const iteration = currentSession.currentIteration;
+  const maxIterations = currentSession.goal.maxIterations || 50;
+  const timeoutMs = currentSession.goal.timeoutMs || 300000;
+
+  // Check timeout
+  if (Date.now() - currentSession.startTime > timeoutMs) {
+    currentSession.status = 'timeout';
+    currentSession.endTime = Date.now();
+    currentSession.finalAnalysis = `Timed out after ${timeoutMs}ms`;
+    const result = { ...currentSession };
+    currentSession = null;
+    return {
+      sessionId,
+      iteration,
+      status: 'timeout',
+      previousSteps: result.steps,
+      finalAnalysis: result.finalAnalysis,
+    };
+  }
+
+  logger.info(`\n=== Iteration ${iteration}/${maxIterations} ===`);
+  logger.info(`Action received: ${action.type} - ${action.reasoning}`);
+
+  const step: LoopStep = {
+    iteration,
+    timestamp: Date.now(),
+    screenshotPath: currentSession.pendingScreenshot?.path,
+    screenshotBase64: currentSession.pendingScreenshot?.base64,
+    analysis: action.reasoning,
+    action,
+  };
+
+  // Handle terminal actions
+  if (action.type === 'done') {
+    step.result = action.params;
+    currentSession.steps.push(step);
+    currentSession.status = action.params?.success ? 'success' : 'failed';
+    currentSession.endTime = Date.now();
+    currentSession.finalAnalysis = action.params?.message;
+
+    const result = { ...currentSession };
+    currentSession = null;
+
+    logger.info(`Loop completed: ${result.status}`);
+    return {
+      sessionId,
+      iteration,
+      status: result.status,
+      result: step.result,
+      previousSteps: result.steps,
+      finalAnalysis: result.finalAnalysis,
+    };
+  }
+
+  if (action.type === 'error') {
+    step.error = action.params?.message;
+    currentSession.steps.push(step);
+    currentSession.status = 'failed';
+    currentSession.endTime = Date.now();
+    currentSession.finalAnalysis = action.params?.message;
+
+    const result = { ...currentSession };
+    currentSession = null;
+
+    logger.info(`Loop failed: ${result.finalAnalysis}`);
+    return {
+      sessionId,
+      iteration,
+      status: 'failed',
+      error: step.error,
+      previousSteps: result.steps,
+      finalAnalysis: result.finalAnalysis,
+    };
+  }
+
+  // Execute the action
+  try {
+    step.result = await executeAction(action);
+    currentSession.steps.push(step);
+    logger.info(`Action executed successfully`);
+  } catch (error: any) {
+    step.error = error.message;
+    currentSession.steps.push(step);
+    logger.error(`Action failed: ${error.message}`);
+    // Continue to next iteration anyway
+  }
+
+  // Check if we've hit max iterations
+  if (iteration >= maxIterations) {
+    currentSession.status = 'max_iterations';
+    currentSession.endTime = Date.now();
+    currentSession.finalAnalysis = `Reached max iterations (${maxIterations}) without completing goal`;
+
+    const result = { ...currentSession };
+    currentSession = null;
+
+    return {
+      sessionId,
+      iteration,
+      status: 'max_iterations',
+      previousSteps: result.steps,
+      finalAnalysis: result.finalAnalysis,
+    };
+  }
+
+  // Small delay before next screenshot
+  await new Promise(r => setTimeout(r, 500));
+
+  // Take next screenshot
+  const nextIteration = iteration + 1;
+  const screenshotPath = `${screenshotDir}/step_${nextIteration}_${Date.now()}.png`;
+  const screenshot = await takeScreenshot({ output: screenshotPath });
+
+  currentSession.currentIteration = nextIteration;
+  currentSession.status = 'awaiting_action';
+  currentSession.pendingScreenshot = {
+    base64: screenshot.base64,
+    path: screenshotPath,
+  };
+
+  return {
+    sessionId,
+    iteration: nextIteration,
+    status: 'awaiting_action',
+    screenshot: { base64: screenshot.base64, path: screenshotPath },
+    previousSteps: currentSession.steps,
+  };
+}
+
+/**
+ * Stop the current loop
+ */
+export async function stopLoop(): Promise<LoopSession | null> {
   if (!currentSession) return null;
 
   currentSession.status = 'failed';
@@ -395,50 +368,66 @@ export async function stopIntelligentLoop(): Promise<LoopSession | null> {
 
   const result = { ...currentSession };
   currentSession = null;
+
+  logger.info('Loop manually stopped');
   return result;
 }
 
+/**
+ * Get current loop status
+ */
 export function getLoopStatus(): LoopSession | null {
-  return currentSession;
+  return currentSession ? { ...currentSession } : null;
 }
 
 // =============================================================================
-// Convenience Functions
+// Legacy Exports (for backward compatibility)
 // =============================================================================
 
+export const runIntelligentLoop = startLoop;
+export const stopIntelligentLoop = stopLoop;
+
 /**
- * Run a simple intelligent test with a text goal
+ * Single-shot screenshot analysis (for one-off analysis without a loop)
+ * Note: This still requires manual analysis by Claude Code
  */
-export async function intelligentTest(
-  goalDescription: string,
-  options: Partial<LoopOptions> = {}
-): Promise<LoopSession> {
-  return runIntelligentLoop({
-    ...options,
-    goal: {
-      description: goalDescription,
-      maxIterations: options.goal?.maxIterations || 30,
-      timeoutMs: options.goal?.timeoutMs || 180000,
-      ...options.goal,
-    },
-  });
+export async function captureForAnalysis(context: string): Promise<{
+  screenshot: { base64: string; path: string };
+  context: string;
+  prompt: string;
+}> {
+  const screenshotPath = `/tmp/intelligent-loop/analysis_${Date.now()}.png`;
+  const { mkdirSync, existsSync } = await import('fs');
+  if (!existsSync('/tmp/intelligent-loop')) {
+    mkdirSync('/tmp/intelligent-loop', { recursive: true });
+  }
+
+  const screenshot = await takeScreenshot({ output: screenshotPath });
+
+  const prompt = `Analyze this screenshot and decide the next action.
+
+Context/Goal: ${context}
+
+Respond with a JSON object:
+{
+  "type": "click" | "type" | "press_key" | "scroll" | "wait" | "focus_window" | "done" | "error",
+  "params": { ... },
+  "reasoning": "..."
 }
 
-/**
- * Analyze a single screenshot and get recommended action
- */
-export async function analyzeState(
-  screenshotBase64: string,
-  context: string,
-  apiKey?: string
-): Promise<LoopAction> {
-  const client = getAnthropicClient(apiKey);
+Action types:
+- click: { "x": number, "y": number, "button": "left"|"right" }
+- type: { "text": "string to type" }
+- press_key: { "key": "Enter"|"Tab"|"Escape"|etc, "modifiers": ["ctrl", "shift"] }
+- scroll: { "direction": "up"|"down", "amount": 300 }
+- wait: { "ms": 1000 }
+- focus_window: { "name": "window name pattern" }
+- done: { "success": true, "message": "Goal achieved because..." }
+- error: { "message": "Cannot proceed because..." }`;
 
-  return analyzeScreenshot(
-    screenshotBase64,
-    { description: context },
-    [],
-    client,
-    'claude-sonnet-4-20250514'
-  );
+  return {
+    screenshot: { base64: screenshot.base64, path: screenshotPath },
+    context,
+    prompt,
+  };
 }
