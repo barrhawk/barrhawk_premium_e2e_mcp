@@ -47,8 +47,16 @@ import {
   type LoopAction,
 } from './frankenstein/intelligent-loop.js';
 import { takeScreenshot } from './frankenstein/system-tools.js';
+import {
+  createGoldenTest,
+  createSwarm,
+  updateSwarmProgress,
+  getSwarmStatus,
+  stopSwarm,
+  parseGoalToRoutes,
+} from './frankenstein/swarm-coordinator.js';
 
-const VERSION = '2026-02-05-v6-callback-architecture';
+const VERSION = '2026-02-05-v7-swarm-golden-test';
 const BRIDGE_URL = process.env.BRIDGE_URL || 'ws://localhost:7000';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3333';
 
@@ -1055,6 +1063,95 @@ Analyze the previous screenshot and provide the appropriate action.`,
       required: ['action'],
     },
   },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GOLDEN TEST - One command to rule them all
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'frank_golden_test',
+    description: `Run a comprehensive "golden journey" E2E test with recording.
+
+THIS IS THE BIG ONE. Give it a goal, and it will:
+1. Parse the goal into parallel test routes
+2. Start desktop recording
+3. Generate Igor subagent configurations for parallel execution
+4. Return everything you need to spawn the Igors
+
+YOU (Claude CLI) then spawn the Igor Tasks in parallel. Each Igor:
+- Runs its own intelligent loop
+- Analyzes screenshots and takes actions
+- Reports progress back
+
+When all Igors complete, you stop recording and have a video of the full test.
+
+Example: "Test PURL PAL extension: navigate to Medicare.gov, open sidepanel, ask about Part D plans, verify AI response"`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal: {
+          type: 'string',
+          description: 'The complete test goal. Can include multiple sub-goals separated by "and", "then", commas.',
+        },
+        maxIgors: {
+          type: 'number',
+          description: 'Maximum parallel Igor agents (default: 3)',
+          default: 3,
+        },
+        recordVideo: {
+          type: 'boolean',
+          description: 'Whether to record the test (default: true)',
+          default: true,
+        },
+      },
+      required: ['goal'],
+    },
+  },
+  {
+    name: 'frank_golden_run',
+    description: `Actually execute a golden test by spawning Igors. Call this after reviewing frank_golden_test output.
+
+This will:
+1. Start desktop recording (if enabled)
+2. Return the Igor prompts formatted for immediate Task tool spawning
+
+After you spawn the Igors, monitor with frank_swarm_status_live until complete, then call frank_golden_finish.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        swarmId: {
+          type: 'string',
+          description: 'Swarm ID from frank_golden_test',
+        },
+        recordVideo: {
+          type: 'boolean',
+          description: 'Start recording before spawning (default: true)',
+          default: true,
+        },
+      },
+      required: ['swarmId'],
+    },
+  },
+  {
+    name: 'frank_golden_finish',
+    description: 'Finish a golden test - stops recording and returns the video path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        swarmId: {
+          type: 'string',
+          description: 'Swarm ID to finish',
+        },
+      },
+      required: ['swarmId'],
+    },
+  },
+  {
+    name: 'frank_swarm_status_live',
+    description: 'Get live status of all running Igors in the current swarm.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
 // =============================================================================
@@ -1680,6 +1777,209 @@ Call frank_loop_continue again with your next action, or use type "done" to fini
       } catch (error: any) {
         return { error: error.message };
       }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Golden Test Handlers
+    // ─────────────────────────────────────────────────────────────────────────────
+    case 'frank_golden_test': {
+      try {
+        const goal = args.goal as string;
+        const result = createGoldenTest(goal, {
+          maxIgors: args.maxIgors as number | undefined,
+          recordVideo: args.recordVideo as boolean | undefined,
+        });
+
+        return {
+          swarmId: result.swarmId,
+          masterGoal: result.masterGoal,
+          routeCount: result.routes.length,
+          routes: result.routes.map(r => ({
+            routeId: r.routeId,
+            name: r.routeName,
+            goal: r.goal,
+            estimatedSteps: r.estimatedSteps,
+          })),
+          igorCount: result.igorTasks.length,
+          recordingInstructions: result.recordingInstructions,
+          nextStep: `Call frank_golden_run with swarmId "${result.swarmId}" to start recording and get Igor prompts.`,
+          // Store tasks for later retrieval
+          _igorTasks: result.igorTasks,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_golden_run': {
+      try {
+        const swarmId = args.swarmId as string;
+        const recordVideo = args.recordVideo !== false;
+
+        // Get swarm status
+        const swarm = getSwarmStatus();
+        if (!swarm || swarm.id !== swarmId) {
+          return { error: `Swarm not found: ${swarmId}. Call frank_golden_test first.` };
+        }
+
+        // Start recording if enabled
+        let recording = null;
+        if (recordVideo) {
+          recording = await startDesktopRecording({
+            filename: `golden_${swarmId}`,
+            outputDir: '/tmp/golden-tests',
+          });
+        }
+
+        // Generate Igor task prompts ready for Task tool
+        const igorTasks = swarm.routes.map((route, i) => {
+          const igorId = `igor_${route.routeId}`;
+          return {
+            igorId,
+            routeId: route.routeId,
+            routeName: route.routeName,
+            // This is the exact format for Claude CLI's Task tool
+            taskToolCall: {
+              subagent_type: 'general-purpose',
+              description: `Igor: ${route.routeName}`,
+              model: 'sonnet',
+              run_in_background: true,
+              prompt: `
+# You are Igor - E2E Testing Agent
+
+## Your Route: ${route.routeName}
+## Goal: ${route.goal}
+
+## Swarm Context
+- Swarm ID: ${swarmId}
+- Route ID: ${route.routeId}
+
+## EXECUTE NOW
+
+1. Start the intelligent loop:
+   frank_loop_start({ goal: "${route.goal.replace(/"/g, '\\"')}" })
+
+2. Look at the returned screenshot and analyze it
+
+3. Decide what action to take and call:
+   frank_loop_continue({
+     sessionId: "<from step 1>",
+     action: { type: "click", params: { x: ..., y: ... }, reasoning: "..." }
+   })
+
+4. Repeat step 2-3 until goal achieved
+
+5. When done:
+   frank_loop_continue({
+     sessionId: "...",
+     action: { type: "done", params: { success: true, message: "Completed" } }
+   })
+
+6. Report completion:
+   frank_swarm_report_progress({
+     swarmId: "${swarmId}",
+     routeId: "${route.routeId}",
+     action: "Route completed",
+     status: "completed"
+   })
+
+## START NOW - Call frank_loop_start
+`.trim(),
+            },
+          };
+        });
+
+        return {
+          swarmId,
+          recording: recording ? {
+            active: true,
+            path: recording.outputPath,
+          } : null,
+          message: 'Recording started. Now spawn the Igor Tasks below.',
+          igorCount: igorTasks.length,
+          spawnThese: igorTasks.map(t => ({
+            igorId: t.igorId,
+            routeName: t.routeName,
+            taskConfig: t.taskToolCall,
+          })),
+          instructions: `
+Use Claude CLI's Task tool to spawn these Igors IN PARALLEL (single message, multiple Task calls):
+
+${igorTasks.map((t, i) => `
+Igor ${i + 1} - ${t.routeName}:
+Task({
+  subagent_type: "${t.taskToolCall.subagent_type}",
+  description: "${t.taskToolCall.description}",
+  model: "${t.taskToolCall.model}",
+  run_in_background: ${t.taskToolCall.run_in_background},
+  prompt: "<prompt above>"
+})
+`).join('')}
+
+After spawning, monitor with frank_swarm_status_live.
+When all complete, call frank_golden_finish({ swarmId: "${swarmId}" }).
+          `.trim(),
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_golden_finish': {
+      try {
+        const swarmId = args.swarmId as string;
+
+        // Stop recording
+        let recording = null;
+        try {
+          recording = await stopDesktopRecording();
+        } catch {
+          // Recording might not be active
+        }
+
+        // Get final swarm status
+        const swarm = stopSwarm();
+
+        return {
+          swarmId,
+          status: 'completed',
+          recording: recording ? {
+            videoPath: recording.outputPath,
+            duration: recording.endTime! - recording.startTime,
+          } : null,
+          swarmResults: swarm ? {
+            totalRoutes: swarm.routes.length,
+            duration: (swarm.endTime || Date.now()) - swarm.startTime,
+            results: Array.from(swarm.results.values()),
+          } : null,
+          message: recording
+            ? `Golden test complete! Video saved to: ${recording.outputPath}`
+            : 'Golden test complete (no recording).',
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_swarm_status_live': {
+      const swarm = getSwarmStatus();
+      if (!swarm) {
+        return { active: false, message: 'No active swarm' };
+      }
+
+      return {
+        swarmId: swarm.id,
+        status: swarm.status,
+        duration: Date.now() - swarm.startTime,
+        routes: swarm.routes.map(r => ({
+          routeId: r.routeId,
+          name: r.routeName,
+          status: swarm.results.get(r.routeId)?.status || 'unknown',
+          steps: swarm.results.get(r.routeId)?.steps || 0,
+        })),
+        allComplete: Array.from(swarm.results.values())
+          .every(r => r.status === 'completed' || r.status === 'failed'),
+      };
     }
 
     default:
