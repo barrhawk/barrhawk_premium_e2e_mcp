@@ -24,6 +24,22 @@ import { createLogger, startTimer } from '../shared/logger.js';
 import { toolRegistry, createToolContext, DynamicTool, ToolSchema, IgorExport } from './dynamic-tools.js';
 import { takeScreenshot, detectTools, getSystemToolDefinitions } from './system-tools.js';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'fs';
+import {
+  startDesktopRecording,
+  stopDesktopRecording,
+  getRecordingStatus,
+  startHeadlessDisplay,
+  stopHeadlessDisplay,
+  getHeadlessStatus,
+  startHeadlessRecording,
+  stopHeadlessRecording,
+} from './desktop-recorder.js';
+import {
+  runIntelligentLoop,
+  stopIntelligentLoop,
+  getLoopStatus,
+  analyzeState,
+} from './intelligent-loop.js';
 
 // =============================================================================
 // Multi-instance support - MUST be defined first
@@ -103,7 +119,7 @@ function resetReconnectBackoff(): void {
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
 // =============================================================================
-const FRANKENSTEIN_VERSION = '2026-01-30-v10-stable-websocket';
+const FRANKENSTEIN_VERSION = '2026-02-05-v11-desktop-recording-intelligent-loop';
 
 // =============================================================================
 // Configuration
@@ -923,6 +939,237 @@ bridge.on('system.window.focus', async (message: BridgeMessage) => {
 });
 
 // =============================================================================
+// Message Handlers - Desktop Recording
+// =============================================================================
+
+bridge.on('desktop.record.start', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const opts = (payload || {}) as {
+    outputDir?: string;
+    filename?: string;
+    format?: 'mp4' | 'webm' | 'mkv';
+    fps?: number;
+    display?: string;
+    audio?: boolean;
+  };
+
+  try {
+    const session = await startDesktopRecording(opts);
+    bridge.sendTo(replyTo, 'desktop.record.started', session, id);
+    logger.info(`Desktop recording started: ${session.id}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Desktop recording failed to start:', { error });
+    bridge.sendTo(replyTo, 'desktop.record.error', { error }, id);
+  }
+});
+
+bridge.on('desktop.record.stop', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+
+  try {
+    const session = await stopDesktopRecording();
+    bridge.sendTo(replyTo, 'desktop.record.stopped', session, id);
+    logger.info(`Desktop recording stopped: ${session.outputPath}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Desktop recording failed to stop:', { error });
+    bridge.sendTo(replyTo, 'desktop.record.error', { error }, id);
+  }
+});
+
+bridge.on('desktop.record.status', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+  const status = getRecordingStatus();
+  bridge.sendTo(replyTo, 'desktop.record.status', { recording: status }, id);
+});
+
+// =============================================================================
+// Message Handlers - Headless Display
+// =============================================================================
+
+bridge.on('headless.start', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const opts = (payload || {}) as {
+    display?: string;
+    resolution?: { width: number; height: number };
+  };
+
+  try {
+    const session = await startHeadlessDisplay(opts);
+    bridge.sendTo(replyTo, 'headless.started', session, id);
+    logger.info(`Headless display started: ${session.display}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Headless display failed to start:', { error });
+    bridge.sendTo(replyTo, 'headless.error', { error }, id);
+  }
+});
+
+bridge.on('headless.stop', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+
+  try {
+    const session = await stopHeadlessDisplay();
+    bridge.sendTo(replyTo, 'headless.stopped', session, id);
+    logger.info('Headless display stopped');
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Headless display failed to stop:', { error });
+    bridge.sendTo(replyTo, 'headless.error', { error }, id);
+  }
+});
+
+bridge.on('headless.status', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+  const status = getHeadlessStatus();
+  bridge.sendTo(replyTo, 'headless.status', { headless: status }, id);
+});
+
+// Combined headless + recording
+bridge.on('headless.record.start', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const opts = (payload || {}) as {
+    display?: string;
+    resolution?: { width: number; height: number };
+    outputDir?: string;
+    filename?: string;
+    format?: 'mp4' | 'webm' | 'mkv';
+    fps?: number;
+  };
+
+  try {
+    const session = await startHeadlessRecording(opts);
+    bridge.sendTo(replyTo, 'headless.record.started', session, id);
+    logger.info(`Headless recording started: ${session.recording.outputPath}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Headless recording failed to start:', { error });
+    bridge.sendTo(replyTo, 'headless.record.error', { error }, id);
+  }
+});
+
+bridge.on('headless.record.stop', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+
+  try {
+    const session = await stopHeadlessRecording();
+    bridge.sendTo(replyTo, 'headless.record.stopped', session, id);
+    logger.info('Headless recording stopped');
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Headless recording failed to stop:', { error });
+    bridge.sendTo(replyTo, 'headless.record.error', { error }, id);
+  }
+});
+
+// =============================================================================
+// Message Handlers - Intelligent Loop (AI-driven E2E)
+// =============================================================================
+
+bridge.on('intelligent.test', async (message: BridgeMessage) => {
+  const { id, payload, source, correlationId } = message;
+  const replyTo = source || 'igor';
+  const {
+    goalDescription,
+    successCriteria,
+    maxIterations,
+    timeoutMs,
+  } = payload as {
+    goalDescription: string;
+    successCriteria?: string[];
+    maxIterations?: number;
+    timeoutMs?: number;
+  };
+
+  try {
+    logger.info(`Starting intelligent test: ${goalDescription}`);
+    const session = await runIntelligentLoop({
+      goal: {
+        description: goalDescription,
+        successCriteria,
+        maxIterations,
+        timeoutMs,
+      },
+      onStep: (step) => {
+        // Emit step progress to Bridge
+        bridge.sendTo(replyTo, 'intelligent.step', {
+          correlationId,
+          step: {
+            iteration: step.iteration,
+            action: step.action.type,
+            reasoning: step.action.reasoning,
+            result: step.result,
+            error: step.error,
+          },
+        });
+      },
+    });
+
+    bridge.sendTo(replyTo, 'intelligent.done', {
+      session: {
+        id: session.id,
+        status: session.status,
+        steps: session.steps.length,
+        duration: session.endTime ? session.endTime - session.startTime : 0,
+        finalAnalysis: session.finalAnalysis,
+      },
+    }, id);
+    logger.info(`Intelligent test completed: ${session.status}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Intelligent test failed:', { error });
+    bridge.sendTo(replyTo, 'intelligent.error', { error }, id);
+  }
+});
+
+bridge.on('intelligent.analyze', async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { screenshotBase64, context } = payload as {
+    screenshotBase64: string;
+    context: string;
+  };
+
+  try {
+    const action = await analyzeState(screenshotBase64, context);
+    bridge.sendTo(replyTo, 'intelligent.analyzed', { action }, id);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'intelligent.error', { error }, id);
+  }
+});
+
+bridge.on('intelligent.stop', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+
+  try {
+    const session = await stopIntelligentLoop();
+    bridge.sendTo(replyTo, 'intelligent.stopped', { session }, id);
+    logger.info('Intelligent loop stopped');
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    bridge.sendTo(replyTo, 'intelligent.error', { error }, id);
+  }
+});
+
+bridge.on('intelligent.status', async (message: BridgeMessage) => {
+  const { id, source } = message;
+  const replyTo = source || 'igor';
+  const status = getLoopStatus();
+  bridge.sendTo(replyTo, 'intelligent.status', { loop: status }, id);
+});
+
+// =============================================================================
 // PHASE 1: Shutdown Handler (from Doctor for tool reloads)
 // =============================================================================
 bridge.on('shutdown' as any, async (message: BridgeMessage) => {
@@ -1218,6 +1465,148 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     const deleted = toolRegistry.delete(toolId);
     res.writeHead(deleted ? 200 : 404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted }));
+    return;
+  }
+
+  // ==========================================================================
+  // Desktop Recording HTTP Endpoints
+  // ==========================================================================
+
+  // Start desktop recording
+  if (url === '/recording/start' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const opts = body ? JSON.parse(body) : {};
+        const session = await startDesktopRecording(opts);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(session));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+    });
+    return;
+  }
+
+  // Stop desktop recording
+  if (url === '/recording/stop' && req.method === 'POST') {
+    try {
+      const session = await stopDesktopRecording();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(session));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    }
+    return;
+  }
+
+  // Get recording status
+  if (url === '/recording/status' && req.method === 'GET') {
+    const status = getRecordingStatus();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ recording: status }));
+    return;
+  }
+
+  // ==========================================================================
+  // Headless Display HTTP Endpoints
+  // ==========================================================================
+
+  // Start headless display
+  if (url === '/headless/start' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const opts = body ? JSON.parse(body) : {};
+        const session = await startHeadlessDisplay(opts);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(session));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+    });
+    return;
+  }
+
+  // Stop headless display
+  if (url === '/headless/stop' && req.method === 'POST') {
+    try {
+      const session = await stopHeadlessDisplay();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(session));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    }
+    return;
+  }
+
+  // Get headless status
+  if (url === '/headless/status' && req.method === 'GET') {
+    const status = getHeadlessStatus();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ headless: status }));
+    return;
+  }
+
+  // Start combined headless recording
+  if (url === '/headless-recording/start' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const opts = body ? JSON.parse(body) : {};
+        const session = await startHeadlessRecording(opts);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(session));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+    });
+    return;
+  }
+
+  // Stop combined headless recording
+  if (url === '/headless-recording/stop' && req.method === 'POST') {
+    try {
+      const session = await stopHeadlessRecording();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(session));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    }
+    return;
+  }
+
+  // ==========================================================================
+  // Intelligent Loop HTTP Endpoints
+  // ==========================================================================
+
+  // Get intelligent loop status
+  if (url === '/intelligent/status' && req.method === 'GET') {
+    const status = getLoopStatus();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ loop: status }));
+    return;
+  }
+
+  // Stop intelligent loop
+  if (url === '/intelligent/stop' && req.method === 'POST') {
+    try {
+      const session = await stopIntelligentLoop();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ session }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    }
     return;
   }
 
