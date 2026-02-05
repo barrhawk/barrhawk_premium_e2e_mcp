@@ -27,8 +27,25 @@ import {
   detectSwarmRoutes,
   SwarmPlan,
 } from './doctor/swarm.js';
+import {
+  startDesktopRecording,
+  stopDesktopRecording,
+  getRecordingStatus,
+  startHeadlessDisplay,
+  stopHeadlessDisplay,
+  getHeadlessStatus,
+  startHeadlessRecording,
+  stopHeadlessRecording,
+} from './frankenstein/desktop-recorder.js';
+import {
+  runIntelligentLoop,
+  stopIntelligentLoop,
+  getLoopStatus,
+  analyzeState,
+} from './frankenstein/intelligent-loop.js';
+import { takeScreenshot } from './frankenstein/system-tools.js';
 
-const VERSION = '2026-01-28-v4-video-recording';
+const VERSION = '2026-02-05-v5-desktop-recording-intelligent-loop';
 const BRIDGE_URL = process.env.BRIDGE_URL || 'ws://localhost:7000';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3333';
 
@@ -766,6 +783,205 @@ const TOOLS: Tool[] = [
       required: ['swarmId', 'routeId', 'success'],
     },
   },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DESKTOP RECORDING - Full screen capture independent of browser
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'frank_desktop_record_start',
+    description: 'Start recording the entire desktop screen. Uses ffmpeg (X11) or wf-recorder (Wayland). Records EVERYTHING visible - browser, sidepanels, system UI, dialogs. Recording continues until stopped.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        outputDir: {
+          type: 'string',
+          description: 'Directory to save recordings (default: /tmp/barrhawk-recordings)',
+        },
+        filename: {
+          type: 'string',
+          description: 'Filename without extension (default: recording_<timestamp>)',
+        },
+        format: {
+          type: 'string',
+          enum: ['mp4', 'webm', 'mkv'],
+          description: 'Output format (default: mp4)',
+        },
+        fps: {
+          type: 'number',
+          description: 'Frames per second (default: 30)',
+        },
+        resolution: {
+          type: 'object',
+          properties: {
+            width: { type: 'number' },
+            height: { type: 'number' },
+          },
+          description: 'Recording resolution (default: screen resolution)',
+        },
+        audio: {
+          type: 'boolean',
+          description: 'Include audio capture (default: false)',
+        },
+      },
+    },
+  },
+  {
+    name: 'frank_desktop_record_stop',
+    description: 'Stop the current desktop recording and return the video file path.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'frank_desktop_record_status',
+    description: 'Get the status of the current desktop recording session.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // HEADLESS SESSION - Virtual display for headless recording
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'frank_headless_start',
+    description: 'Start a headless virtual display (Xvfb). Useful for running visual tests on servers without a display. Can be combined with desktop recording.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        display: {
+          type: 'string',
+          description: 'X display number (default: :99)',
+        },
+        resolution: {
+          type: 'object',
+          properties: {
+            width: { type: 'number', default: 1920 },
+            height: { type: 'number', default: 1080 },
+          },
+          description: 'Virtual display resolution (default: 1920x1080)',
+        },
+      },
+    },
+  },
+  {
+    name: 'frank_headless_stop',
+    description: 'Stop the headless virtual display.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'frank_headless_record_start',
+    description: 'Start both a headless display AND recording in one call. Perfect for CI/CD environments or recording demos on headless servers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        display: {
+          type: 'string',
+          description: 'X display number (default: :99)',
+        },
+        resolution: {
+          type: 'object',
+          properties: {
+            width: { type: 'number', default: 1920 },
+            height: { type: 'number', default: 1080 },
+          },
+          description: 'Resolution for both display and recording',
+        },
+        outputDir: {
+          type: 'string',
+          description: 'Directory to save recordings',
+        },
+        filename: {
+          type: 'string',
+          description: 'Recording filename without extension',
+        },
+        format: {
+          type: 'string',
+          enum: ['mp4', 'webm', 'mkv'],
+          description: 'Output format (default: mp4)',
+        },
+      },
+    },
+  },
+  {
+    name: 'frank_headless_record_stop',
+    description: 'Stop both recording and headless display, returning the video file path.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  // ─────────────────────────────────────────────────────────────────────────────
+  // INTELLIGENT LOOP - AI-driven E2E testing
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    name: 'frank_intelligent_test',
+    description: 'Run an AI-driven E2E test. Takes a goal description, then iteratively: screenshots the screen, analyzes with Claude vision, decides and executes the next action. Continues until goal is achieved or max iterations reached.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal: {
+          type: 'string',
+          description: 'Natural language description of the test goal (e.g., "Navigate to Medicare.gov and compare three Part D plans")',
+        },
+        successCriteria: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of specific success criteria to check',
+        },
+        maxIterations: {
+          type: 'number',
+          description: 'Maximum number of think-act iterations (default: 30)',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Timeout in milliseconds (default: 180000 = 3 minutes)',
+        },
+        screenshotDir: {
+          type: 'string',
+          description: 'Directory to save step screenshots (default: /tmp/intelligent-loop)',
+        },
+      },
+      required: ['goal'],
+    },
+  },
+  {
+    name: 'frank_intelligent_analyze',
+    description: 'Analyze a single screenshot and get AI-recommended next action. Useful for step-by-step manual control with AI guidance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        context: {
+          type: 'string',
+          description: 'Description of what you are trying to do',
+        },
+        screenshotBase64: {
+          type: 'string',
+          description: 'Base64-encoded screenshot to analyze. If not provided, takes a fresh OS screenshot.',
+        },
+      },
+      required: ['context'],
+    },
+  },
+  {
+    name: 'frank_intelligent_status',
+    description: 'Get the status of the current intelligent loop session.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'frank_intelligent_stop',
+    description: 'Stop the current intelligent loop session.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
 // =============================================================================
@@ -1141,6 +1357,183 @@ ${dashboardReported ? `View live progress: ${DASHBOARD_URL}` : 'Dashboard not av
           : 'Failed to update route status (dashboard may be unavailable)',
         dashboardUrl: reported ? DASHBOARD_URL : undefined,
       };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Desktop Recording Handlers
+    // ─────────────────────────────────────────────────────────────────────────────
+    case 'frank_desktop_record_start': {
+      try {
+        const session = await startDesktopRecording({
+          outputDir: args.outputDir as string | undefined,
+          filename: args.filename as string | undefined,
+          format: args.format as 'mp4' | 'webm' | 'mkv' | undefined,
+          fps: args.fps as number | undefined,
+          resolution: args.resolution as { width: number; height: number } | undefined,
+          audio: args.audio as boolean | undefined,
+        });
+        return {
+          success: true,
+          session,
+          message: `Recording started: ${session.outputPath}`,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_desktop_record_stop': {
+      try {
+        const session = await stopDesktopRecording();
+        return {
+          success: true,
+          session,
+          videoPath: session.outputPath,
+          duration: session.endTime! - session.startTime,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_desktop_record_status': {
+      const status = getRecordingStatus();
+      return status || { recording: false, message: 'No active recording' };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Headless Display Handlers
+    // ─────────────────────────────────────────────────────────────────────────────
+    case 'frank_headless_start': {
+      try {
+        const session = await startHeadlessDisplay({
+          display: args.display as string | undefined,
+          resolution: args.resolution as { width: number; height: number } | undefined,
+        });
+        return {
+          success: true,
+          session,
+          display: session.display,
+          message: `Headless display started on ${session.display}`,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_headless_stop': {
+      try {
+        const session = await stopHeadlessDisplay();
+        return {
+          success: true,
+          session,
+          message: 'Headless display stopped',
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_headless_record_start': {
+      try {
+        const { headless, recording } = await startHeadlessRecording({
+          display: args.display as string | undefined,
+          resolution: args.resolution as { width: number; height: number } | undefined,
+          outputDir: args.outputDir as string | undefined,
+          filename: args.filename as string | undefined,
+          format: args.format as 'mp4' | 'webm' | 'mkv' | undefined,
+        });
+        return {
+          success: true,
+          headless,
+          recording,
+          display: headless.display,
+          videoPath: recording.outputPath,
+          message: `Headless recording started on ${headless.display}`,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_headless_record_stop': {
+      try {
+        const { headless, recording } = await stopHeadlessRecording();
+        return {
+          success: true,
+          headless,
+          recording,
+          videoPath: recording.outputPath,
+          duration: recording.endTime! - recording.startTime,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Intelligent Loop Handlers
+    // ─────────────────────────────────────────────────────────────────────────────
+    case 'frank_intelligent_test': {
+      try {
+        const goal = args.goal as string;
+        const session = await runIntelligentLoop({
+          goal: {
+            description: goal,
+            successCriteria: args.successCriteria as string[] | undefined,
+            maxIterations: args.maxIterations as number | undefined,
+            timeoutMs: args.timeoutMs as number | undefined,
+          },
+          screenshotDir: args.screenshotDir as string | undefined,
+        });
+        return {
+          success: session.status === 'success',
+          session,
+          status: session.status,
+          steps: session.steps.length,
+          finalAnalysis: session.finalAnalysis,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_intelligent_analyze': {
+      try {
+        let screenshotBase64 = args.screenshotBase64 as string | undefined;
+
+        // Take a screenshot if not provided
+        if (!screenshotBase64) {
+          const screenshot = await takeScreenshot({});
+          screenshotBase64 = screenshot.base64;
+        }
+
+        const context = args.context as string;
+        const action = await analyzeState(screenshotBase64, context);
+        return {
+          success: true,
+          action,
+          reasoning: action.reasoning,
+        };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    }
+
+    case 'frank_intelligent_status': {
+      const status = getLoopStatus();
+      return status || { running: false, message: 'No active intelligent loop' };
+    }
+
+    case 'frank_intelligent_stop': {
+      try {
+        const session = await stopIntelligentLoop();
+        return session
+          ? { success: true, session, message: 'Intelligent loop stopped' }
+          : { success: false, message: 'No active loop to stop' };
+      } catch (error: any) {
+        return { error: error.message };
+      }
     }
 
     default:
