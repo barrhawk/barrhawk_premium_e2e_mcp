@@ -38,6 +38,17 @@ import { DeadLetterQueue } from '../shared/dead-letter.js';
 import { ConnectionManager } from '../shared/connection-manager.js';
 import { CircuitBreakerRegistry, CircuitState } from '../shared/circuit-breaker.js';
 import { RateLimiter, SlidingWindowCounter } from '../shared/rate-limiter.js';
+import {
+  renderOverview,
+  renderComponents,
+  renderMessages,
+  renderCircuits,
+  renderHub,
+  fetchHubProjects,
+  fetchHubTargets,
+  fetchHubRuns,
+  type DashboardContext,
+} from './dashboard.js';
 
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
@@ -701,7 +712,7 @@ function getHealth(): BridgeHealth & {
 // =============================================================================
 // HTTP Server
 // =============================================================================
-const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const url = req.url || '/';
   const correlationId = req.headers['x-correlation-id'] as string || generateId();
 
@@ -1115,6 +1126,94 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(summary));
+    return;
+  }
+
+  // ==========================================================================
+  // Dashboard Routes - Integrated UI
+  // ==========================================================================
+
+  const dashboardCtx: DashboardContext = {
+    getHealth,
+    getComponents: () => Array.from(componentRegistry.entries()).map(([compId, connId]) => {
+      const conn = connectionManager.get(connId);
+      return {
+        id: compId,
+        version: componentVersions.get(compId),
+        connectionId: connId,
+        healthScore: conn?.healthScore ?? 0,
+        messagesSent: conn?.messagesSent ?? 0,
+        lastActivity: conn?.lastActivity,
+        connectedAt: conn?.connectedAt,
+      };
+    }),
+    getMessages: (limit: number) => messageLog.getRecent(limit),
+    getDlqStats: () => ({
+      stats: deadLetterQueue.getStats(),
+      recent: deadLetterQueue.getRecent(50),
+    }),
+    getCircuits: () => circuitBreakers.getAllStats(),
+    getMetrics: () => metrics.getStats(),
+    getSwarms: () => [],  // TODO: integrate swarm tracking
+    getReports: () => reportsStore.getAll(),
+  };
+
+  // Main dashboard page
+  if (url === '/dashboard' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(renderOverview(dashboardCtx));
+    return;
+  }
+
+  // Dashboard - Components
+  if (url === '/dashboard/components' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(renderComponents(dashboardCtx));
+    return;
+  }
+
+  // Dashboard - Messages
+  if (url === '/dashboard/messages' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(renderMessages(dashboardCtx));
+    return;
+  }
+
+  // Dashboard - Circuit Breakers
+  if (url === '/dashboard/circuits' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(renderCircuits(dashboardCtx));
+    return;
+  }
+
+  // Dashboard - Hub
+  if (url === '/dashboard/hub' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(renderHub(dashboardCtx));
+    return;
+  }
+
+  // Dashboard Hub API - Projects
+  if (url === '/dashboard/api/hub/projects' && req.method === 'GET') {
+    const html = await fetchHubProjects();
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html);
+    return;
+  }
+
+  // Dashboard Hub API - Targets
+  if (url === '/dashboard/api/hub/targets' && req.method === 'GET') {
+    const html = await fetchHubTargets();
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html);
+    return;
+  }
+
+  // Dashboard Hub API - Runs
+  if (url === '/dashboard/api/hub/runs' && req.method === 'GET') {
+    const html = await fetchHubRuns();
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html);
     return;
   }
 
@@ -1720,6 +1819,7 @@ httpServer.listen(PORT, () => {
   logger.info(`Doctors: http://localhost:${PORT}/doctors`);
   logger.info(`Screenshots: ${SCREENSHOTS_DIR}`);
   logger.info(`WebSocket: ws://localhost:${PORT}`);
+  logger.info(`Dashboard: http://localhost:${PORT}/dashboard`);
   logger.info('='.repeat(60));
   logger.info('🏰 FORTRESS MODE ACTIVE - Bridge is unbreakable');
   logger.info('📊 Reports Hub ready - stable report storage');
