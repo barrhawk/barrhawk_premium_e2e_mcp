@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const TRIPARTITE = resolve(ROOT, 'tripartite');
+const HUB = resolve(ROOT, 'hub');
 
 // =============================================================================
 // Config
@@ -20,18 +21,40 @@ interface Component {
   name: string;
   port: number;
   script: string;
+  cwd: string;
   color: string;
   process?: ChildProcess;
   status: 'starting' | 'healthy' | 'unhealthy' | 'crashed';
   restarts: number;
+  optional?: boolean;  // Don't fail if component can't start
 }
 
-const COMPONENTS: Component[] = [
-  { name: 'Bridge', port: 7000, script: 'bridge/index.ts', color: '\x1b[36m', status: 'starting', restarts: 0 },
-  { name: 'Igor', port: 7002, script: 'igor/index.ts', color: '\x1b[33m', status: 'starting', restarts: 0 },
-  { name: 'Frank', port: 7003, script: 'frankenstein/index.ts', color: '\x1b[35m', status: 'starting', restarts: 0 },
-  { name: 'Doctor', port: 7001, script: 'doctor/index.ts', color: '\x1b[32m', status: 'starting', restarts: 0 },
+// Parse CLI args for component selection
+const args = process.argv.slice(2);
+const hubMode = args.includes('--hub') || args.includes('-h');
+const minimalMode = args.includes('--minimal') || args.includes('-m');
+
+// Core tripartite components
+const CORE_COMPONENTS: Component[] = [
+  { name: 'Bridge', port: 7000, script: 'bridge/index.ts', cwd: TRIPARTITE, color: '\x1b[36m', status: 'starting', restarts: 0 },
+  { name: 'Igor', port: 7002, script: 'igor/index.ts', cwd: TRIPARTITE, color: '\x1b[33m', status: 'starting', restarts: 0 },
+  { name: 'Frank', port: 7003, script: 'frankenstein/index.ts', cwd: TRIPARTITE, color: '\x1b[35m', status: 'starting', restarts: 0 },
+  { name: 'Doctor', port: 7001, script: 'doctor/index.ts', cwd: TRIPARTITE, color: '\x1b[32m', status: 'starting', restarts: 0 },
 ];
+
+// Hub components (test orchestration platform)
+const HUB_COMPONENTS: Component[] = [
+  { name: 'Hub', port: 7010, script: 'index.ts', cwd: HUB, color: '\x1b[94m', status: 'starting', restarts: 0 },
+  { name: 'Coord', port: 7011, script: 'coordinator.ts', cwd: HUB, color: '\x1b[95m', status: 'starting', restarts: 0 },
+  { name: 'IgorDB', port: 7012, script: 'igor-db.ts', cwd: HUB, color: '\x1b[96m', status: 'starting', restarts: 0, optional: true },
+];
+
+// Select components based on mode
+const COMPONENTS: Component[] = minimalMode
+  ? CORE_COMPONENTS.slice(0, 2)  // Just Bridge + Igor
+  : hubMode
+    ? [...CORE_COMPONENTS, ...HUB_COMPONENTS]
+    : CORE_COMPONENTS;
 
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
@@ -59,9 +82,11 @@ function componentLog(comp: Component, msg: string) {
 }
 
 function banner() {
+  const mode = hubMode ? ' + Hub' : minimalMode ? ' (minimal)' : '';
   console.log(`
 ${BOLD}╔═══════════════════════════════════════════════════════════╗
-║  ${YELLOW}🦅 BarrHawk E2E${RESET}${BOLD} - Premium Browser Automation MCP        ║
+║  ${YELLOW}🦅 BarrHawk E2E${RESET}${BOLD}${mode.padEnd(44 - mode.length)}║
+║  Premium Browser Automation + Test Orchestration MCP       ║
 ╚═══════════════════════════════════════════════════════════╝${RESET}
 `);
 }
@@ -80,9 +105,15 @@ function statusLine() {
 // =============================================================================
 function startComponent(comp: Component): Promise<void> {
   return new Promise((resolve) => {
-    const scriptPath = `${TRIPARTITE}/${comp.script}`;
+    const scriptPath = `${comp.cwd}/${comp.script}`;
 
     if (!existsSync(scriptPath)) {
+      if (comp.optional) {
+        componentLog(comp, `${DIM}Skipped (optional)${RESET}`);
+        comp.status = 'crashed';
+        resolve();
+        return;
+      }
       componentLog(comp, `${RED}Script not found: ${scriptPath}${RESET}`);
       comp.status = 'crashed';
       resolve();
@@ -93,7 +124,7 @@ function startComponent(comp: Component): Promise<void> {
     componentLog(comp, `Starting on port ${comp.port}...`);
 
     const proc = spawn('bun', ['run', scriptPath], {
-      cwd: TRIPARTITE,
+      cwd: comp.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, FORCE_COLOR: '1' },
     });
@@ -223,12 +254,13 @@ async function main() {
   log('Cleaning up existing processes...');
   try {
     const { execSync } = await import('child_process');
-    execSync('pkill -f "bun.*tripartite/(bridge|doctor|igor|frankenstein)" 2>/dev/null || true', { stdio: 'ignore' });
+    execSync('pkill -f "bun.*(tripartite|hub)/(bridge|doctor|igor|frankenstein|index|coordinator|igor-db)" 2>/dev/null || true', { stdio: 'ignore' });
   } catch {}
   await new Promise(r => setTimeout(r, 1000));
 
   // Start components in order (Bridge first, then others)
-  log('Starting tripartite stack...\n');
+  const modeLabel = hubMode ? 'tripartite stack + Hub' : minimalMode ? 'minimal stack' : 'tripartite stack';
+  log(`Starting ${modeLabel}...\n`);
 
   for (const comp of COMPONENTS) {
     await startComponent(comp);
@@ -240,18 +272,31 @@ async function main() {
 
   console.log('\n');
   log(`${GREEN}${BOLD}Stack ready!${RESET}`);
+
+  const hubEndpoints = hubMode ? `
+    ${DIM}─── Hub (Test Orchestration) ───${RESET}
+    Hub:         http://localhost:7010  ${DIM}(REST API)${RESET}
+    Coordinator: http://localhost:7011
+    Igor-DB:     http://localhost:7012` : '';
+
   console.log(`
   ${DIM}Endpoints:${RESET}
     Bridge:      http://localhost:7000
     Doctor:      http://localhost:7001  ${DIM}(POST /plan)${RESET}
     Igor:        http://localhost:7002
     Frankenstein: http://localhost:7003
+${hubEndpoints}
 
   ${DIM}Quick test:${RESET}
     curl -X POST http://localhost:7001/plan \\
       -H "Content-Type: application/json" \\
       -d '{"intent":"go to google.com and search for barrhawk","url":"https://google.com"}'
-
+${hubMode ? `
+  ${DIM}Hub API:${RESET}
+    curl http://localhost:7010/projects
+    curl -X POST http://localhost:7010/projects \\
+      -d '{"name":"MyApp","baseUrl":"http://localhost:3000"}'
+` : ''}
   ${DIM}Press Ctrl+C to stop${RESET}
 `);
 
