@@ -1,7 +1,7 @@
 {
     "name": "barrhawk-premium-e2e",
-    "version": "0.4.0",
-    "description": "BarrHawk E2E - Full SDLC MCP for Claude Code with browser automation, database, GitHub, Docker, and MCP orchestration",
+    "version": "0.5.0",
+    "description": "BarrHawk E2E - Tripartite Browser Automation + Test Orchestration MCP for Claude Code",
     "author": "BarrHawk",
     "license": "MIT",
     "repository": {
@@ -9,24 +9,16 @@
         "url": "https://github.com/barrhawk/barrhawk_premium_e2e_mcp"
     },
     "type": "module",
-    "main": "dist/index.js",
     "bin": {
-        "barrhawk": "./bin/barrhawk.ts",
-        "barrhawk-e2e": "./dist/index.js"
+        "barrhawk": "./bin/barrhawk.ts"
     },
     "scripts": {
         "barrhawk": "bun run bin/barrhawk.ts",
         "stack": "bun run bin/barrhawk.ts",
-        "build": "tsc",
-        "build:bun": "bun build src/index.ts --outdir dist --target node",
-        "start": "node dist/index.js",
-        "dev": "tsc --watch",
-        "dev:bun": "bun --hot src/index.ts",
+        "hub": "bun run bin/barrhawk.ts --hub",
+        "minimal": "bun run bin/barrhawk.ts --minimal",
         "test": "bun test",
-        "test:smoke": "bun test test/smoke.test.ts",
-        "typecheck": "tsc --noEmit",
-        "clean": "rm -rf dist",
-        "prepublishOnly": "npm run build",
+        "typecheck": "bunx tsc --noEmit",
         "postinstall": "npx playwright install chromium || echo 'Run: npx playwright install chromium'"
     },
     "keywords": [
@@ -62,17 +54,8 @@
     },
     "devDependencies": {
         "@types/archiver": "^6.0.0",
-        "@types/better-sqlite3": "^7.6.0",
         "@types/node": "^22.0.0",
         "@types/pg": "^8.11.0",
-        "bun-types": "^1.0.0",
-        "typescript": "^5.6.0"
-    },
-    "files": [
-        "dist",
-        "README.md",
-        "LICENSE",
-        "CHANGELOG.md",
-        "barrhawk.config.json"
-    ]
+        "bun-types": "^1.0.0"
+    }
 }
