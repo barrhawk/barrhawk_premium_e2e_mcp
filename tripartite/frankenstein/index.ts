@@ -210,6 +210,83 @@ let browserLastUsed = Date.now();
 let browserIdleEvictions = 0;
 
 // =============================================================================
+// Browser Watchdog - Force-kill stuck browsers
+// =============================================================================
+const BROWSER_OP_TIMEOUT = 30000; // 30s max for any browser operation
+let browserOperationStart: number | null = null;
+let browserOperationName: string | null = null;
+let browserForceKillCount = 0;
+
+/**
+ * Force-kill the browser when it's stuck
+ * This is a last resort when browser.close() hangs
+ */
+async function forceKillBrowser(reason: string): Promise<void> {
+  logger.warn(`Force-killing browser: ${reason}`);
+  browserForceKillCount++;
+
+  // Try graceful close with short timeout first
+  if (browser) {
+    const closePromise = browser.close().catch(() => {});
+    const timeoutPromise = new Promise<void>(resolve => setTimeout(resolve, 2000));
+    await Promise.race([closePromise, timeoutPromise]);
+  }
+
+  // Force null all references regardless
+  browser = null;
+  context = null;
+  page = null;
+  browserCloseCount++;
+  browserOperationStart = null;
+  browserOperationName = null;
+
+  logger.info('Browser force-killed successfully');
+}
+
+/**
+ * Wrap browser operations with timeout and force-kill on hang
+ */
+async function withBrowserTimeout<T>(
+  operationName: string,
+  operation: () => Promise<T>,
+  timeoutMs: number = BROWSER_OP_TIMEOUT
+): Promise<T> {
+  browserOperationStart = Date.now();
+  browserOperationName = operationName;
+
+  try {
+    const result = await Promise.race([
+      operation(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Browser operation timed out: ${operationName}`)), timeoutMs)
+      )
+    ]);
+    return result;
+  } catch (err) {
+    // If timeout, force-kill the browser
+    if (err instanceof Error && err.message.includes('timed out')) {
+      await forceKillBrowser(`Operation ${operationName} hung for ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    browserOperationStart = null;
+    browserOperationName = null;
+  }
+}
+
+// Watchdog interval - check for stuck operations every 5s
+setInterval(() => {
+  if (browserOperationStart && browserOperationName) {
+    const elapsed = Date.now() - browserOperationStart;
+    if (elapsed > BROWSER_OP_TIMEOUT + 5000) {
+      // Operation has exceeded timeout + grace period - force kill
+      logger.error(`Watchdog: Browser stuck on ${browserOperationName} for ${elapsed}ms, forcing kill`);
+      forceKillBrowser(`Watchdog detected stuck ${browserOperationName}`).catch(() => {});
+    }
+  }
+}, 5000);
+
+// =============================================================================
 // Browser Idle Eviction
 // =============================================================================
 setInterval(() => {
@@ -257,7 +334,21 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
         // Check resource limits
         if (browser !== null) {
           logger.warn('Browser already launched, closing existing');
-          await browser.close();
+          // Use timeout to prevent hanging on stuck browser
+          const closePromise = browser.close().catch((err) => {
+            logger.warn('Browser close failed, force-killing', { error: err.message });
+          });
+          const timeoutPromise = new Promise<void>(resolve => {
+            setTimeout(() => {
+              logger.warn('Browser close timed out (5s), proceeding anyway');
+              resolve();
+            }, 5000);
+          });
+          await Promise.race([closePromise, timeoutPromise]);
+          // Force clear references regardless of close result
+          browser = null;
+          context = null;
+          page = null;
           browserCloseCount++;
         }
 
@@ -1014,6 +1105,23 @@ bridge.on('system.window.focus', async (message: BridgeMessage) => {
 });
 
 // =============================================================================
+// Browser Force-Kill Handler (from Igor or Doctor when stuck)
+// =============================================================================
+bridge.on('browser.forceKill' as any, async (message: BridgeMessage) => {
+  const { id, payload, source } = message;
+  const replyTo = source || 'igor';
+  const { reason } = (payload || {}) as { reason?: string };
+
+  logger.info(`Browser force-kill requested via Bridge: ${reason || 'no reason'}`);
+  await forceKillBrowser(reason || 'Bridge request');
+
+  bridge.sendTo(replyTo, 'browser.forceKilled', {
+    success: true,
+    forceKillCount: browserForceKillCount,
+  }, id);
+});
+
+// =============================================================================
 // PHASE 1: Shutdown Handler (from Doctor for tool reloads)
 // =============================================================================
 bridge.on('shutdown' as any, async (message: BridgeMessage) => {
@@ -1165,8 +1273,11 @@ function getHealth(): ComponentHealth & { resources: object; dynamicTools: objec
       totalLaunched: browserLaunchCount,
       totalClosed: browserCloseCount,
       idleEvictions: browserIdleEvictions,
+      forceKills: browserForceKillCount,
       currentBrowserIdleMs: idleMs,
       idleTimeoutMs: BROWSER_IDLE_TIMEOUT,
+      currentOperation: browserOperationName,
+      operationElapsedMs: browserOperationStart ? Date.now() - browserOperationStart : null,
       memoryUsage: process.memoryUsage().heapUsed,
       screenshotsDir: SCREENSHOTS_DIR,
     },
@@ -1320,6 +1431,15 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     const deleted = toolRegistry.delete(toolId);
     res.writeHead(deleted ? 200 : 404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted }));
+    return;
+  }
+
+  // Force kill browser (POST /browser/kill)
+  if (url === '/browser/kill' && req.method === 'POST') {
+    logger.info('Manual browser force-kill requested via HTTP');
+    await forceKillBrowser('Manual HTTP request');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, forceKillCount: browserForceKillCount }));
     return;
   }
 
