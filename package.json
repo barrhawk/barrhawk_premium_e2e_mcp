@@ -11,9 +11,12 @@
     "type": "module",
     "main": "dist/index.js",
     "bin": {
+        "barrhawk": "./bin/barrhawk.ts",
         "barrhawk-e2e": "./dist/index.js"
     },
     "scripts": {
+        "barrhawk": "bun run bin/barrhawk.ts",
+        "stack": "bun run bin/barrhawk.ts",
         "build": "tsc",
         "build:bun": "bun build src/index.ts --outdir dist --target node",
         "start": "node dist/index.js",
