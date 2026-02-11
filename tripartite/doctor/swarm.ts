@@ -12,6 +12,15 @@
  */
 
 import { selectToolsForIntent, ToolDefinition, TOOL_REGISTRY, CATEGORY_INFO } from '../shared/tool-registry.js';
+import { getExperienceManager } from '../shared/experience.js';
+import { createLogger } from '../shared/logger.js';
+
+const logger = createLogger({
+  component: 'doctor-swarm',
+  version: '1.0.0',
+  minLevel: 'INFO',
+  pretty: true,
+});
 
 // =============================================================================
 // Types
@@ -206,9 +215,20 @@ export function shouldUseSwarm(intent: string): { useSwarm: boolean; reason: str
 /**
  * Build a tool bag for a specific route
  */
-export function buildToolBag(route: DetectedRoute, maxTools: number = 15): ToolBagEntry[] {
+export function buildToolBag(route: DetectedRoute, maxTools: number = 15, url?: string): ToolBagEntry[] {
   const tools: ToolBagEntry[] = [];
   const addedNames = new Set<string>();
+  const experience = getExperienceManager();
+
+  // Check if we have site-specific knowledge
+  const sitePattern = url ? experience.findSitePattern(url) : null;
+
+  if (sitePattern) {
+    logger.info(`Using site pattern: ${sitePattern.name}`, {
+      knownSelectors: Object.keys(sitePattern.knownSelectors).length,
+      commonFlows: sitePattern.commonFlows?.length || 0,
+    });
+  }
 
   // First, add tools from suggested categories (highest priority)
   for (const categoryId of route.suggestedCategories) {
@@ -217,9 +237,21 @@ export function buildToolBag(route: DetectedRoute, maxTools: number = 15): ToolB
       if (tools.length >= maxTools) break;
       if (addedNames.has(tool.name)) continue;
 
+      // Enhance tool description with site-specific hints if available
+      let description = tool.description;
+      if (sitePattern && sitePattern.knownSelectors) {
+        const selectorHints = Object.entries(sitePattern.knownSelectors)
+          .filter(([key]) => key.includes(tool.name.replace('browser_', '')))
+          .map(([key, sel]) => `${key}: ${sel}`)
+          .join(', ');
+        if (selectorHints) {
+          description += ` [Site hints: ${selectorHints}]`;
+        }
+      }
+
       tools.push({
         name: tool.name,
-        description: tool.description,
+        description,
         inputSchema: tool.inputSchema,
         category: tool.category,
       });

@@ -57,6 +57,29 @@ export interface ErrorPattern {
   lastSeen: Date;
 }
 
+export interface Lesson {
+  id: string;
+  title: string;              // Short description: "Password regex captures trailing comma"
+  symptom: string;            // What was observed: "Login failing with 'Invalid password'"
+  rootCause: string;          // What was actually wrong: "Regex [^\s\"']+ captured comma from 'password X, then...'"
+  fix: string;                // How it was resolved: "Changed regex to [^\s\"',]+ to exclude commas"
+  detection: string;          // How to spot this in future: "Check if captured values have unexpected punctuation"
+  category: 'parsing' | 'browser' | 'timing' | 'selector' | 'state' | 'architecture' | 'other';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  context?: {
+    url?: string;
+    intent?: string;
+    errorMessage?: string;
+    filesModified?: string[];
+    screenshotPath?: string;
+    logSnippet?: string;
+  };
+  tags: string[];
+  createdAt: Date;
+  updatedAt: Date;
+  occurrences: number;        // How many times this lesson was relevant
+}
+
 interface ExperienceData {
   selectors: {
     successes: SelectorExperience[];
@@ -65,6 +88,7 @@ interface ExperienceData {
   timings: TimingExperience[];
   sites: SitePattern[];
   errors: ErrorPattern[];
+  lessons: Lesson[];
   metadata: {
     lastUpdated: Date;
     totalPlans: number;
@@ -114,6 +138,7 @@ export class ExperienceManager {
       timings: [],
       sites: [],
       errors: [],
+      lessons: [],
       metadata: {
         lastUpdated: new Date(),
         totalPlans: 0,
@@ -169,6 +194,7 @@ export class ExperienceManager {
     }
 
     this.dirty = true;
+    this.save(); // Immediately persist selector successes
   }
 
   recordSelectorFailure(selector: string, description: string, url: string): void {
@@ -192,6 +218,7 @@ export class ExperienceManager {
     }
 
     this.dirty = true;
+    this.save(); // Immediately persist selector failures
   }
 
   findBestSelector(description: string, url: string): string | null {
@@ -371,6 +398,151 @@ export class ExperienceManager {
   }
 
   // ===========================================================================
+  // Lessons Learned
+  // ===========================================================================
+
+  /**
+   * Record a high-level lesson learned from debugging.
+   * These capture root causes and fixes that operational data misses.
+   */
+  recordLesson(lesson: Omit<Lesson, 'id' | 'createdAt' | 'updatedAt' | 'occurrences'>): Lesson {
+    // Initialize lessons array if needed (for existing data files without it)
+    if (!this.data.lessons) {
+      this.data.lessons = [];
+    }
+
+    // Check if similar lesson exists (by title similarity)
+    const existing = this.data.lessons.find(l =>
+      l.title.toLowerCase() === lesson.title.toLowerCase() ||
+      (l.rootCause === lesson.rootCause && l.category === lesson.category)
+    );
+
+    if (existing) {
+      // Update existing lesson
+      existing.occurrences++;
+      existing.updatedAt = new Date();
+      if (lesson.context) {
+        existing.context = { ...existing.context, ...lesson.context };
+      }
+      existing.tags = [...new Set([...existing.tags, ...lesson.tags])];
+      this.dirty = true;
+      this.save();
+      logger.info(`Updated lesson: "${existing.title}" (${existing.occurrences} occurrences)`);
+      return existing;
+    }
+
+    // Create new lesson
+    const newLesson: Lesson = {
+      id: `lesson_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      ...lesson,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      occurrences: 1,
+    };
+
+    this.data.lessons.push(newLesson);
+    this.dirty = true;
+    this.save();
+    logger.info(`Recorded new lesson: "${newLesson.title}" [${newLesson.category}/${newLesson.severity}]`);
+    return newLesson;
+  }
+
+  /**
+   * Find lessons that might be relevant to the current situation
+   */
+  findRelevantLessons(query: {
+    symptom?: string;
+    category?: Lesson['category'];
+    tags?: string[];
+    errorMessage?: string;
+  }): Lesson[] {
+    if (!this.data.lessons) return [];
+
+    return this.data.lessons.filter(lesson => {
+      // Match by category
+      if (query.category && lesson.category !== query.category) return false;
+
+      // Match by tags
+      if (query.tags?.length) {
+        const hasMatchingTag = query.tags.some(tag =>
+          lesson.tags.some(t => t.toLowerCase().includes(tag.toLowerCase()))
+        );
+        if (!hasMatchingTag) return false;
+      }
+
+      // Match by symptom similarity (simple keyword matching)
+      if (query.symptom) {
+        const symptomWords = query.symptom.toLowerCase().split(/\s+/);
+        const lessonWords = `${lesson.symptom} ${lesson.title} ${lesson.rootCause}`.toLowerCase();
+        const matchCount = symptomWords.filter(w => lessonWords.includes(w)).length;
+        if (matchCount < 2) return false;
+      }
+
+      // Match by error message pattern
+      if (query.errorMessage && lesson.context?.errorMessage) {
+        const errorWords = query.errorMessage.toLowerCase().split(/\s+/).slice(0, 5);
+        const lessonErrorWords = lesson.context.errorMessage.toLowerCase();
+        const matchCount = errorWords.filter(w => lessonErrorWords.includes(w)).length;
+        if (matchCount < 2) return false;
+      }
+
+      return true;
+    }).sort((a, b) => {
+      // Sort by relevance: severity, then occurrences, then recency
+      const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+      if (severityOrder[a.severity] !== severityOrder[b.severity]) {
+        return severityOrder[b.severity] - severityOrder[a.severity];
+      }
+      if (a.occurrences !== b.occurrences) {
+        return b.occurrences - a.occurrences;
+      }
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+  }
+
+  /**
+   * Get all lessons, optionally filtered by category
+   */
+  getLessons(category?: Lesson['category']): Lesson[] {
+    if (!this.data.lessons) return [];
+    if (category) {
+      return this.data.lessons.filter(l => l.category === category);
+    }
+    return [...this.data.lessons];
+  }
+
+  /**
+   * Get lessons summary for quick reference
+   */
+  getLessonsSummary(): {
+    total: number;
+    byCategory: Record<string, number>;
+    bySeverity: Record<string, number>;
+    recentLessons: Array<{ title: string; category: string; severity: string }>;
+  } {
+    const lessons = this.data.lessons || [];
+    const byCategory: Record<string, number> = {};
+    const bySeverity: Record<string, number> = {};
+
+    for (const lesson of lessons) {
+      byCategory[lesson.category] = (byCategory[lesson.category] || 0) + 1;
+      bySeverity[lesson.severity] = (bySeverity[lesson.severity] || 0) + 1;
+    }
+
+    const recentLessons = [...lessons]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5)
+      .map(l => ({ title: l.title, category: l.category, severity: l.severity }));
+
+    return {
+      total: lessons.length,
+      byCategory,
+      bySeverity,
+      recentLessons,
+    };
+  }
+
+  // ===========================================================================
   // Plan Stats
   // ===========================================================================
 
@@ -388,6 +560,7 @@ export class ExperienceManager {
     knownSelectors: number;
     knownSites: number;
     knownErrors: number;
+    lessonsLearned: number;
   } {
     return {
       totalPlans: this.data.metadata.totalPlans,
@@ -397,6 +570,7 @@ export class ExperienceManager {
       knownSelectors: this.data.selectors.successes.length,
       knownSites: this.data.sites.length,
       knownErrors: this.data.errors.length,
+      lessonsLearned: this.data.lessons?.length || 0,
     };
   }
 }

@@ -184,6 +184,7 @@ interface Plan {
   intent: string;
   steps: PlanStep[];
   createdAt: Date;
+  expectedOutcome?: string | null;  // For verification
 }
 
 interface PlanState {
@@ -1181,22 +1182,26 @@ function generateBranchingPlan(intent: string): BranchingPlanResult | null {
   };
 }
 
-function generatePlan(intent: string): Plan {
+function generatePlan(intent: string, explicitUrl?: string): Plan {
   const id = generateId();
-  logger.info( `Generating plan for intent: "${intent}"`);
+  logger.info( `Generating plan for intent: "${intent}"${explicitUrl ? ` with URL: ${explicitUrl}` : ''}`);
 
   // Simple intent parsing - this will be enhanced with Claude later
   const steps: PlanStep[] = [];
 
-  // Always start with launching browser
-  steps.push({ action: 'launch', params: { headless: true } });
+  // Always start with launching browser (headless: false for debugging cookies)
+  steps.push({ action: 'launch', params: { headless: false } });
 
-  // Parse URL from intent
+  // Parse URL from intent or use explicit URL
   const urlMatch = intent.match(/navigate to (\S+)/i) || intent.match(/go to (\S+)/i);
-  let targetUrl: string | undefined;
+  let targetUrl: string | undefined = explicitUrl;
 
   if (urlMatch) {
     targetUrl = urlMatch[1];
+  }
+
+  // Add navigate step if we have a URL
+  if (targetUrl) {
 
     // Get recommended timeout from experience
     const timeout = experience.getRecommendedTimeout('navigate', targetUrl);
@@ -1213,6 +1218,149 @@ function generatePlan(intent: string): Plan {
       logger.info(`Found site pattern for ${sitePattern.name}`, { selectors: Object.keys(sitePattern.knownSelectors) });
     }
   }
+
+  // ==========================================================================
+  // FORM-AWARE PATTERNS (Item #2: More explicit action parsing)
+  // ==========================================================================
+
+  // LOGIN PATTERN: "login as X with password Y" or "login with email X password Y"
+  // Note: password capture excludes comma to handle "password X, then..." patterns
+  const loginMatch = intent.match(/login (?:as |with email )?["']?([^\s"']+)["']? (?:with )?password ["']?([^\s"',]+)["']?/i);
+  if (loginMatch) {
+    const email = loginMatch[1];
+    const password = loginMatch[2];
+    logger.info(`Detected login pattern: ${email}`);
+
+    // Wait for page to fully load before interacting with form
+    steps.push({ action: 'wait', params: { ms: 1000 } });
+
+    // Simplified selectors for login form
+    steps.push({
+      action: 'type',
+      params: {
+        selector: 'input[name="email"]',
+        text: email,
+        clear: true,
+      },
+      timeout: 5000,
+    });
+    steps.push({
+      action: 'type',
+      params: {
+        selector: 'input[name="password"]',
+        text: password,
+        clear: true,
+      },
+      timeout: 5000,
+    });
+    // Debug screenshot before clicking login
+    steps.push({ action: 'screenshot', params: {} });
+
+    steps.push({
+      action: 'click',
+      params: {
+        selector: 'button[type="submit"]',
+        waitForNavigation: true,  // Wait for form submission redirect
+      },
+      timeout: 10000,
+    });
+    // Brief wait for page to settle after login redirect
+    steps.push({ action: 'wait', params: { ms: 500 } });
+  }
+
+  // POST SUBMISSION PATTERN: "submit/create/post titled X with content Y to subreddit Z"
+  const postMatch = intent.match(/(?:submit|create|post).*?(?:titled?|title) ["'](.+?)["'].*?(?:content|body|text) ["'](.+?)["'](?:.*?(?:to|in) (?:the )?(?:r\/)?(\w+))?/i);
+  if (postMatch) {
+    const title = postMatch[1];
+    const content = postMatch[2];
+    const subreddit = postMatch[3];
+    logger.info(`Detected post submission pattern: "${title}" to ${subreddit || 'default'}`);
+
+    // Wait for login redirect to complete
+    steps.push({ action: 'wait', params: { ms: 3000 } });
+
+    // Take screenshot to verify login success
+    steps.push({ action: 'screenshot', params: {} });
+
+    // Click Submit Post link from home page (preserves session)
+    steps.push({
+      action: 'click',
+      params: { text: 'Submit Post', waitForNavigation: true },
+      timeout: 10000,
+    });
+    steps.push({ action: 'wait', params: { ms: 500 } });
+
+    // Fill title
+    steps.push({
+      action: 'type',
+      params: {
+        selector: 'input[name="title"], input[id="title"], input[placeholder*="title" i]',
+        text: title,
+      },
+      timeout: 5000,
+    });
+
+    // Fill content
+    steps.push({
+      action: 'type',
+      params: {
+        selector: 'textarea[name="content"], textarea[id="content"], textarea[placeholder*="content" i], textarea',
+        text: content,
+      },
+      timeout: 5000,
+    });
+
+    // Select subreddit if specified (uses select dropdown)
+    if (subreddit) {
+      steps.push({
+        action: 'select',
+        params: {
+          selector: 'select[name="subreddit"]',
+          value: subreddit,
+        },
+        timeout: 5000,
+      });
+    }
+
+    // Click submit button
+    steps.push({
+      action: 'click',
+      params: {
+        selector: 'button[type="submit"], input[type="submit"]',
+        text: 'Submit',
+        waitForNavigation: true,
+      },
+      timeout: 10000,
+    });
+    steps.push({ action: 'wait', params: { ms: 1000 } });
+  }
+
+  // APPROVAL PATTERN: "approve post/the post titled X"
+  const approveMatch = intent.match(/approve (?:the )?(?:post )?(?:titled )?["']?(.+?)["']?$/i);
+  if (approveMatch && !postMatch) {  // Don't match if it's a post submission
+    const postTitle = approveMatch[1];
+    logger.info(`Detected approval pattern: "${postTitle}"`);
+
+    // Go to mod queue
+    steps.push({
+      action: 'click',
+      params: { text: 'Mod Queue' },
+      timeout: 5000,
+    });
+    steps.push({ action: 'wait', params: { ms: 500 } });
+
+    // Click approve on the specific post
+    steps.push({
+      action: 'click',
+      params: { text: 'Approve' },  // Will click first Approve button - could be improved
+      timeout: 5000,
+    });
+    steps.push({ action: 'wait', params: { ms: 500 } });
+  }
+
+  // ==========================================================================
+  // END FORM-AWARE PATTERNS
+  // ==========================================================================
 
   // Parse click actions
   const clickMatch = intent.match(/click (?:on )?["'](.+?)["']/i) || intent.match(/click (?:on )?(\S+)/i);
@@ -1274,6 +1422,35 @@ function generatePlan(intent: string): Plan {
     });
   }
 
+  // ==========================================================================
+  // VERIFICATION STEPS (Item #1 & #3: Plan verification & screenshot assertions)
+  // ==========================================================================
+
+  // Build expected outcome based on detected patterns
+  let expectedOutcome: string | null = null;
+
+  if (loginMatch) {
+    expectedOutcome = 'User should be logged in. Page should show dashboard, profile, or logged-in state. Should NOT show login form.';
+  } else if (postMatch) {
+    expectedOutcome = `Post titled "${postMatch[1]}" should be created. Page should show success message, confirmation, or redirect to the new post. Should NOT show form errors.`;
+  } else if (approveMatch) {
+    expectedOutcome = `Post should be approved. Status should change from pending to approved. Should show success indication.`;
+  }
+
+  // Add verification step if we have an expected outcome
+  if (expectedOutcome) {
+    steps.push({
+      action: 'verify',
+      params: {
+        type: 'smart_assert',
+        expected: expectedOutcome,
+        intent: intent,
+        captureScreenshot: true,
+      },
+      timeout: 10000,
+    });
+  }
+
   // Always take a screenshot at the end
   steps.push({ action: 'screenshot', params: {} });
 
@@ -1285,6 +1462,7 @@ function generatePlan(intent: string): Plan {
     intent,
     steps,
     createdAt: new Date(),
+    expectedOutcome,  // Store for later reference
   };
 
   logger.info(`Generated plan ${id} with ${steps.length} steps (experience-enhanced)`);
@@ -1679,7 +1857,7 @@ bridge.on('step.failed', (message: BridgeMessage) => {
 
       // Record error pattern
       experience.recordError(
-        error,
+        errorStr,
         `Step ${step.action} failed`,
         'Check selector or element availability'
       );
@@ -1692,14 +1870,14 @@ bridge.on('step.failed', (message: BridgeMessage) => {
       const pageUrl = navStep?.params.url as string | undefined;
 
       // Generate failure pattern key
-      const failureKey = getFailurePatternKey(step.action, error, selector);
+      const failureKey = getFailurePatternKey(step.action, errorStr, selector);
 
       // Get or create failure pattern entry
       let pattern = failurePatterns.get(failureKey);
       if (!pattern) {
         pattern = {
           action: step.action,
-          errorPattern: error,
+          errorPattern: errorStr,
           selector,
           url: pageUrl,
           occurrences: 0,
@@ -2120,6 +2298,40 @@ bridge.on('igor.exited' as any, (message: BridgeMessage) => {
 });
 
 // =============================================================================
+// Lightning Strike Feedback - Learn from Igor's thinking
+// =============================================================================
+bridge.on('igor.thought' as any, (message: BridgeMessage) => {
+  const { planId, prompt, thought, context } = message.payload as {
+    id?: string;
+    planId?: string;
+    prompt: string;
+    thought: string;
+    context?: { action?: string; error?: string };
+  };
+
+  logger.info(`🧠 Igor thought received`, {
+    planId,
+    promptLength: prompt.length,
+    thoughtLength: thought.length,
+    hasError: !!context?.error,
+  });
+
+  // If there was an error and Claude figured out a fix, record it in experience system
+  if (context?.error && thought) {
+    experience.recordError(
+      context.error,
+      `Igor was stuck on ${context.action || 'unknown action'}`,
+      thought.substring(0, 500) // Store Claude's reasoning as the fix hint
+    );
+
+    logger.info(`📚 Recorded error pattern from Igor thought`, {
+      action: context.action,
+      errorPrefix: context.error.substring(0, 50),
+    });
+  }
+});
+
+// =============================================================================
 // Health Check
 // =============================================================================
 function getHealth(): ComponentHealth & { planLimits: object; reconnection: object; experience: object; igors: object } {
@@ -2433,7 +2645,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
     req.on('end', async () => {
       try {
-        const { intent, forceBranching } = JSON.parse(body);
+        const { intent, forceBranching, url: explicitUrl } = JSON.parse(body);
 
         // Validate intent
         const intentValidation = validateIntent(intent);
@@ -2475,7 +2687,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
         }
 
         // Standard single-plan flow
-        const plan = generatePlan(sanitizedIntent);
+        const plan = generatePlan(sanitizedIntent, explicitUrl);
 
         // Validate generated plan before submission
         const planValidation = validatePlan(plan.steps);

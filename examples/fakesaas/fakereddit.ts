@@ -519,6 +519,9 @@ Bun.serve({
       const password = form.get('password') as string;
       const user = users.get(email);
 
+      // Debug logging
+      console.log('[FakeReddit] Login attempt:', { email, password, userFound: !!user, passwordMatch: user?.password === password });
+
       if (user && user.password === password) {
         const sid = genId();
         sessions.set(sid, email);

@@ -1563,6 +1563,39 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
+      // Handle tool.created broadcast request from Frankenstein
+      if (message.type === 'tool.created') {
+        const { tool } = message.payload as {
+          tool: { id: string; name: string; description: string; inputSchema: object }
+        };
+
+        logger.info(`📦 New tool created: ${tool.name}, broadcasting to active Igors`);
+
+        // Broadcast to all Igors
+        const injectMessage: BridgeMessage = {
+          id: generateId(),
+          timestamp: new Date(),
+          source: 'bridge',
+          target: 'broadcast',
+          type: 'tool.inject',
+          payload: { tool },
+          version: BRIDGE_VERSION,
+          correlationId,
+        };
+
+        // Find all Igor connections and send to them
+        for (const [compId, compConnId] of componentRegistry) {
+          if (compId.startsWith('igor')) {
+            const conn = connectionManager.get(compConnId);
+            if (conn && conn.ws.readyState === 1) {  // 1 = OPEN
+              conn.ws.send(JSON.stringify(injectMessage));
+              logger.debug(`Tool inject sent to ${compId}`);
+            }
+          }
+        }
+        return;
+      }
+
       // Route message
       routeMessage(message, connId, correlationId);
       connectionManager.recordSuccess(connId);

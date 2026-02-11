@@ -8,6 +8,8 @@
  */
 
 import { createLogger } from '../shared/logger.js';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 const logger = createLogger({
   component: 'frank-tools',
@@ -99,6 +101,97 @@ export interface IgorExport {
 class DynamicToolRegistry {
   private tools = new Map<string, DynamicTool>();
   private durations = new Map<string, number[]>();  // Track timing for stats
+  private readonly persistDir: string;
+
+  constructor(persistDir?: string) {
+    this.persistDir = persistDir || process.env.TOOLS_DIR || '/home/raptor/federal/barrhawk_e2e_premium_mcp/experiencegained/tools';
+    // Load persisted tools on startup
+    this.loadFromDisk();
+  }
+
+  /**
+   * Load igorified tools from disk
+   */
+  private loadFromDisk(): void {
+    try {
+      if (!existsSync(this.persistDir)) {
+        mkdirSync(this.persistDir, { recursive: true });
+        return;
+      }
+
+      const indexPath = join(this.persistDir, 'tools.json');
+      if (!existsSync(indexPath)) return;
+
+      const data = JSON.parse(readFileSync(indexPath, 'utf-8')) as {
+        savedAt: string;
+        tools: Array<{
+          name: string;
+          description: string;
+          code: string;
+          inputSchema: ToolSchema;
+          igorifiedAt: string;
+          stats: { invocations: number; successes: number; failures: number };
+        }>;
+      };
+
+      logger.info(`Loading ${data.tools?.length || 0} igorified tools from disk`);
+
+      for (const toolDef of data.tools || []) {
+        // Register each tool (async but we fire-and-forget during startup)
+        this.register({
+          name: toolDef.name,
+          description: toolDef.description,
+          code: toolDef.code,
+          inputSchema: toolDef.inputSchema,
+          author: 'disk',
+        }).then(tool => {
+          // Restore the igorified status
+          tool.status = 'igorified';
+          tool.igorifiedAt = new Date(toolDef.igorifiedAt);
+          // Restore stats
+          tool.invocations = toolDef.stats?.invocations || 0;
+          tool.successes = toolDef.stats?.successes || 0;
+          tool.failures = toolDef.stats?.failures || 0;
+          logger.debug(`Restored igorified tool: ${tool.name}`);
+        }).catch(err => {
+          logger.error(`Failed to restore tool ${toolDef.name}:`, err);
+        });
+      }
+    } catch (err) {
+      logger.error('Failed to load tools from disk:', err);
+    }
+  }
+
+  /**
+   * Save igorified tools to disk
+   */
+  saveToDisk(): void {
+    try {
+      mkdirSync(this.persistDir, { recursive: true });
+
+      const igorified = this.list().filter(t => t.status === 'igorified');
+      const data = {
+        savedAt: new Date().toISOString(),
+        tools: igorified.map(t => ({
+          name: t.name,
+          description: t.description,
+          code: t.code,
+          inputSchema: t.inputSchema,
+          igorifiedAt: t.igorifiedAt?.toISOString() || new Date().toISOString(),
+          stats: {
+            invocations: t.invocations,
+            successes: t.successes,
+            failures: t.failures,
+          },
+        })),
+      };
+
+      writeFileSync(join(this.persistDir, 'tools.json'), JSON.stringify(data, null, 2));
+      logger.info(`Saved ${igorified.length} igorified tools to disk`);
+    } catch (err) {
+      logger.error('Failed to save tools to disk:', err);
+    }
+  }
 
   /**
    * Register a new dynamic tool from source code
@@ -352,6 +445,9 @@ export const ${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')} = {
       tool.status = 'igorified';
       tool.igorifiedAt = new Date();
       logger.info(`Tool igorified: ${tool.name}`, { id: tool.id });
+
+      // Persist to disk immediately
+      this.saveToDisk();
     }
   }
 

@@ -394,7 +394,23 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           bridge.sendTo(replyTo, 'browser.error', serializeError(Errors.browserNotLaunched()), id);
           return;
         }
-        const { selector, text } = payload as { selector?: string; text?: string };
+        const { selector, text, waitForNavigation: wfn } = payload as { selector?: string; text?: string; waitForNavigation?: boolean };
+
+        // Helper to perform click with optional navigation wait
+        const performClick = async (clickFn: () => Promise<void>) => {
+          if (wfn) {
+            // Wait for navigation after click (for form submissions, links, etc.)
+            await Promise.all([
+              page!.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => {
+                // Navigation timeout is OK - some clicks don't navigate
+                logger.debug('No navigation after click (may be expected)');
+              }),
+              clickFn(),
+            ]);
+          } else {
+            await clickFn();
+          }
+        };
 
         // Validate selector if provided
         if (selector) {
@@ -407,7 +423,7 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
             logger.warn( `Blocked click with invalid selector: ${selectorValidation.error}`);
             return;
           }
-          await page.click(selectorValidation.sanitized!);
+          await performClick(() => page!.click(selectorValidation.sanitized!));
         } else if (text) {
           const textValidation = validateText(text, 1000);
           if (!textValidation.valid) {
@@ -417,7 +433,7 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
             }, id);
             return;
           }
-          await page.getByText(textValidation.sanitized!).click();
+          await performClick(() => page!.getByText(textValidation.sanitized!).click());
         } else {
           bridge.sendTo(replyTo, 'browser.error', {
             error: 'Click requires either selector or text',
@@ -426,8 +442,8 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
           return;
         }
 
-        bridge.sendTo(replyTo, 'browser.clicked', { selector, text }, id);
-        logger.info( `Clicked: ${selector || text}`);
+        bridge.sendTo(replyTo, 'browser.clicked', { selector, text, navigated: wfn }, id);
+        logger.info( `Clicked: ${selector || text}${wfn ? ' (waited for navigation)' : ''}`);
         break;
       }
 
@@ -465,6 +481,41 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
         await page.fill(selectorValidation.sanitized!, textValidation.sanitized!);
         bridge.sendTo(replyTo, 'browser.typed', { selector: selectorValidation.sanitized, length: textValidation.sanitized!.length }, id);
         logger.info( `Typed into: ${selectorValidation.sanitized}`);
+        break;
+      }
+
+      case 'browser.select': {
+        if (!page) {
+          bridge.sendTo(replyTo, 'browser.error', serializeError(Errors.browserNotLaunched()), id);
+          return;
+        }
+        const { selector: sel, value, label } = payload as { selector: string; value?: string; label?: string };
+
+        // Validate selector
+        const selectorValidation = validateSelector(sel);
+        if (!selectorValidation.valid) {
+          bridge.sendTo(replyTo, 'browser.error', {
+            error: `Selector validation failed: ${selectorValidation.error}`,
+            command: 'browser.select',
+          }, id);
+          return;
+        }
+
+        // Select by value or label
+        if (value) {
+          await page.selectOption(selectorValidation.sanitized!, { value });
+        } else if (label) {
+          await page.selectOption(selectorValidation.sanitized!, { label });
+        } else {
+          bridge.sendTo(replyTo, 'browser.error', {
+            error: 'Select requires either value or label',
+            command: 'browser.select',
+          }, id);
+          return;
+        }
+
+        bridge.sendTo(replyTo, 'browser.selected', { selector: selectorValidation.sanitized, value, label }, id);
+        logger.info(`Selected: ${selectorValidation.sanitized} -> ${value || label}`);
         break;
       }
 
@@ -582,6 +633,33 @@ async function handleBrowserCommand(message: BridgeMessage): Promise<void> {
         break;
       }
 
+      case 'browser.evaluate': {
+        if (!page) {
+          bridge.sendTo(replyTo, 'error', { message: 'No active page' }, id);
+          break;
+        }
+
+        const script = payload.script as string;
+        if (!script) {
+          bridge.sendTo(replyTo, 'error', { message: 'Script is required' }, id);
+          break;
+        }
+
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-implied-eval
+          const result = await page.evaluate((s: string) => {
+            // eslint-disable-next-line no-eval
+            return eval(s);
+          }, script);
+
+          bridge.sendTo(replyTo, 'browser.evaluated', { result }, id);
+          logger.info('Evaluated script', { scriptLength: script.length });
+        } catch (e) {
+          bridge.sendTo(replyTo, 'error', { message: (e as Error).message }, id);
+        }
+        break;
+      }
+
       case 'video.status': {
         bridge.sendTo(replyTo, 'video.status', {
           isRecording,
@@ -633,6 +711,7 @@ bridge.on('browser.launch', handleBrowserCommand);
 bridge.on('browser.navigate', handleBrowserCommand);
 bridge.on('browser.click', handleBrowserCommand);
 bridge.on('browser.type', handleBrowserCommand);
+bridge.on('browser.select', handleBrowserCommand);
 bridge.on('browser.screenshot', handleBrowserCommand);
 bridge.on('browser.close', handleBrowserCommand);
 bridge.on('video.status', handleBrowserCommand);
@@ -656,11 +735,23 @@ bridge.on('tool.create', async (message: BridgeMessage) => {
   try {
     const tool = await toolRegistry.register({ name, description, code, inputSchema, author });
     logger.info(`Dynamic tool created: ${name}`, { toolId: tool.id, correlationId });
+
+    // Notify the original requestor
     bridge.sendTo(replyTo, 'tool.created', {
       id: tool.id,
       name: tool.name,
       status: tool.status,
     }, id);
+
+    // Notify Bridge about new tool for broadcast to all Igors
+    bridge.sendTo('bridge', 'tool.created' as any, {
+      tool: {
+        id: tool.id,
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      },
+    });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error(`Failed to create tool ${name}:`, { error, correlationId });
@@ -1164,6 +1255,17 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       try {
         const { name, description, code, inputSchema, author } = JSON.parse(body);
         const tool = await toolRegistry.register({ name, description, code, inputSchema, author });
+
+        // Broadcast tool creation to Bridge for Igor injection
+        bridge.sendTo('bridge', 'tool.created' as any, {
+          tool: {
+            id: tool.id,
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          },
+        });
+
         res.writeHead(201, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ id: tool.id, name: tool.name, status: tool.status }));
       } catch (err) {

@@ -23,6 +23,12 @@ import { validatePlan } from '../shared/validation.js';
 import { CircuitBreaker, CircuitOpenError } from '../shared/circuit-breaker.js';
 import { stableToolkit, createToolContext } from './stable-toolkit.js';
 import { frankManager } from './frank-manager.js';
+import { getExperienceManager } from '../shared/experience.js';
+
+// =============================================================================
+// Experience Manager - Learning from past runs
+// =============================================================================
+const experience = getExperienceManager();
 
 // =============================================================================
 // VERSION CANARY - CHANGE THIS ON EVERY DEPLOY
@@ -213,6 +219,20 @@ Help solve the problem. Be concise and action-oriented.`;
     if (lightningState.thinkingHistory.length > 20) {
       lightningState.thinkingHistory.shift();
     }
+
+    // Send thought to Doctor for learning (B→A escalation feedback)
+    bridge.sendTo('doctor', 'igor.thought' as any, {
+      id: IGOR_ID,
+      planId: currentPlan?.id,
+      stepIndex: currentStep,
+      prompt,
+      thought,
+      context: {
+        action: currentPlan?.steps[currentStep]?.action,
+        error: lightningState.reason,
+      },
+      timestamp: new Date(),
+    });
 
     logger.info('🧠 Thought complete', { responseLength: thought.length });
     return thought;
@@ -593,6 +613,15 @@ async function executePlan(plan: Plan): Promise<void> {
         err instanceof Error ? err : undefined
       );
 
+      // Record selector failure for experience system
+      if (step.params?.selector) {
+        experience.recordSelectorFailure(
+          step.params.selector as string,
+          step.action,
+          currentUrl
+        );
+      }
+
       // Check if we should auto-strike to Claude mode
       checkAutoStrike(
         err instanceof Error ? err : new Error(String(err)),
@@ -715,6 +744,158 @@ async function executePlan(plan: Plan): Promise<void> {
 }
 
 // =============================================================================
+// SMART VERIFICATION: Pattern-based assertion checking
+// =============================================================================
+
+interface VerificationResult {
+  passed: boolean;
+  reason: string;
+  indicators: {
+    positive: string[];
+    negative: string[];
+  };
+}
+
+function performSmartVerification(
+  expected: string,
+  pageText: string,
+  pageUrl: string,
+  intent: string
+): VerificationResult {
+  const positiveIndicators: string[] = [];
+  const negativeIndicators: string[] = [];
+  const expectedLower = expected.toLowerCase();
+  const pageTextLower = pageText.toLowerCase();
+
+  // === LOGIN VERIFICATION ===
+  if (expectedLower.includes('logged in') || expectedLower.includes('login')) {
+    // Positive signals for successful login
+    const loginSuccessSignals = [
+      'dashboard', 'welcome', 'profile', 'logout', 'sign out',
+      'account', 'settings', 'home', 'my ', 'hello',
+    ];
+    for (const signal of loginSuccessSignals) {
+      if (pageTextLower.includes(signal)) {
+        positiveIndicators.push(`Found "${signal}" on page`);
+      }
+    }
+
+    // Negative signals (still on login page)
+    const loginFailSignals = [
+      'invalid', 'incorrect', 'error', 'failed', 'wrong password',
+      'sign in', 'log in', 'login form', 'forgot password',
+    ];
+    for (const signal of loginFailSignals) {
+      if (pageTextLower.includes(signal) && !pageTextLower.includes('logout')) {
+        negativeIndicators.push(`Found "${signal}" suggesting still on login`);
+      }
+    }
+
+    // URL check
+    if (pageUrl.includes('/login') || pageUrl.includes('/signin')) {
+      negativeIndicators.push('URL still contains /login or /signin');
+    } else if (pageUrl.includes('/dashboard') || pageUrl.includes('/home')) {
+      positiveIndicators.push('URL suggests logged-in area');
+    }
+  }
+
+  // === POST CREATION VERIFICATION ===
+  if (expectedLower.includes('post') && (expectedLower.includes('created') || expectedLower.includes('submitted'))) {
+    // Extract post title from expected
+    const titleMatch = expected.match(/["'](.+?)["']/);
+    const expectedTitle = titleMatch ? titleMatch[1] : null;
+
+    if (expectedTitle && pageTextLower.includes(expectedTitle.toLowerCase())) {
+      positiveIndicators.push(`Found post title "${expectedTitle}" on page`);
+    }
+
+    // Success signals
+    const postSuccessSignals = [
+      'posted', 'submitted', 'created', 'success', 'published',
+      'your post', 'new post', 'thank you',
+    ];
+    for (const signal of postSuccessSignals) {
+      if (pageTextLower.includes(signal)) {
+        positiveIndicators.push(`Found "${signal}" suggesting post success`);
+      }
+    }
+
+    // Failure signals
+    const postFailSignals = [
+      'error', 'failed', 'invalid', 'required', 'please fill',
+      'cannot be empty', 'missing',
+    ];
+    for (const signal of postFailSignals) {
+      if (pageTextLower.includes(signal)) {
+        negativeIndicators.push(`Found "${signal}" suggesting post failure`);
+      }
+    }
+
+    // Check if still on form page
+    if (pageTextLower.includes('submit') && pageTextLower.includes('title') && pageTextLower.includes('content')) {
+      negativeIndicators.push('Page appears to still show submission form');
+    }
+  }
+
+  // === APPROVAL VERIFICATION ===
+  if (expectedLower.includes('approved')) {
+    const approvalSuccessSignals = ['approved', 'published', 'live', 'active'];
+    for (const signal of approvalSuccessSignals) {
+      if (pageTextLower.includes(signal)) {
+        positiveIndicators.push(`Found "${signal}" status`);
+      }
+    }
+
+    if (pageTextLower.includes('pending')) {
+      negativeIndicators.push('Post still shows as pending');
+    }
+  }
+
+  // === GENERAL "SHOULD NOT" CHECKS ===
+  const shouldNotMatch = expected.match(/should NOT (?:show|display|contain|have) (.+?)(?:\.|$)/i);
+  if (shouldNotMatch) {
+    const shouldNotContain = shouldNotMatch[1].toLowerCase();
+    if (pageTextLower.includes(shouldNotContain)) {
+      negativeIndicators.push(`Page contains "${shouldNotContain}" which it should NOT`);
+    } else {
+      positiveIndicators.push(`Correctly does not contain "${shouldNotContain}"`);
+    }
+  }
+
+  // === DECISION ===
+  // Pass if we have positive indicators and minimal negative ones
+  const positiveScore = positiveIndicators.length;
+  const negativeScore = negativeIndicators.length;
+
+  let passed = false;
+  let reason = '';
+
+  if (positiveScore > 0 && negativeScore === 0) {
+    passed = true;
+    reason = `Verification passed: ${positiveIndicators[0]}`;
+  } else if (positiveScore > negativeScore * 2) {
+    passed = true;
+    reason = `Verification passed with warnings: ${positiveScore} positive vs ${negativeScore} negative signals`;
+  } else if (negativeScore > 0) {
+    passed = false;
+    reason = `Verification failed: ${negativeIndicators[0]}`;
+  } else {
+    // No clear signals - need more context
+    passed = false;
+    reason = 'Verification inconclusive: no clear indicators found';
+  }
+
+  return {
+    passed,
+    reason,
+    indicators: {
+      positive: positiveIndicators,
+      negative: negativeIndicators,
+    },
+  };
+}
+
+// =============================================================================
 // PHASE 3: Current Tool Bag from Doctor
 // =============================================================================
 let currentToolBag: ToolBagItem[] = [];
@@ -730,6 +911,9 @@ function hasToolInBag(toolName: string): boolean {
   return currentToolBag.some(t => t.name === toolName || t.name === `frank_${toolName}`);
 }
 
+// Track current URL for experience system
+let currentUrl = '';
+
 async function executeStep(step: PlanStep): Promise<unknown> {
   const timeout = step.timeout || 30000;
 
@@ -737,14 +921,74 @@ async function executeStep(step: PlanStep): Promise<unknown> {
     case 'launch':
       return sendToFrankenstein('browser.launch', step.params, timeout);
 
-    case 'navigate':
-      return sendToFrankenstein('browser.navigate', step.params, timeout);
+    case 'navigate': {
+      const result = await sendToFrankenstein('browser.navigate', step.params, timeout);
+      // Track current URL for experience system
+      currentUrl = (step.params.url as string) || '';
+      return result;
+    }
 
-    case 'click':
-      return sendToFrankenstein('browser.click', step.params, timeout);
+    case 'click': {
+      let selector = step.params.selector as string;
+      const text = step.params.text as string;
 
-    case 'type':
-      return sendToFrankenstein('browser.type', step.params, timeout);
+      // Check if this is a known bad selector and try to find a better one
+      if (selector && experience.isKnownBadSelector(selector, currentUrl)) {
+        logger.warn(`Known bad selector: ${selector}, looking for alternative`);
+        const better = experience.findBestSelector(text || 'click', currentUrl);
+        if (better) {
+          logger.info(`Using experience-based selector: ${better}`);
+          selector = better;
+          step.params.selector = better;
+        }
+      }
+
+      const clickResult = await sendToFrankenstein('browser.click', step.params, timeout);
+
+      // Record success
+      if (selector) {
+        experience.recordSelectorSuccess(selector, text || 'click', currentUrl);
+      }
+
+      return clickResult;
+    }
+
+    case 'type': {
+      let selector = step.params.selector as string;
+      const text = step.params.text as string;
+
+      // Check if this is a known bad selector
+      if (selector && experience.isKnownBadSelector(selector, currentUrl)) {
+        logger.warn(`Known bad selector: ${selector}, looking for alternative`);
+        const better = experience.findBestSelector('input', currentUrl);
+        if (better) {
+          logger.info(`Using experience-based selector: ${better}`);
+          selector = better;
+          step.params.selector = better;
+        }
+      }
+
+      const typeResult = await sendToFrankenstein('browser.type', step.params, timeout);
+
+      // Record success
+      if (selector) {
+        experience.recordSelectorSuccess(selector, 'type', currentUrl);
+      }
+
+      return typeResult;
+    }
+
+    case 'select': {
+      const selector = step.params.selector as string;
+      const selectResult = await sendToFrankenstein('browser.select', step.params, timeout);
+
+      // Record success
+      if (selector) {
+        experience.recordSelectorSuccess(selector, 'select', currentUrl);
+      }
+
+      return selectResult;
+    }
 
     case 'screenshot':
       return sendToFrankenstein('browser.screenshot', step.params, timeout);
@@ -759,6 +1003,77 @@ async function executeStep(step: PlanStep): Promise<unknown> {
     // PHASE 3: Execute intent using available tools from tool bag
     case 'execute_intent':
       return executeIntentWithToolBag(step.params.intent as string, timeout);
+
+    // SMART ASSERTIONS: Verify expected outcomes
+    case 'verify': {
+      const verifyType = step.params.type as string || 'smart_assert';
+      const expected = step.params.expected as string;
+      const intent = step.params.intent as string;
+      const captureScreenshot = step.params.captureScreenshot !== false;
+
+      logger.info(`🔍 Verification step: ${verifyType}`, { expected: expected?.substring(0, 100) });
+
+      // Take screenshot for visual verification
+      let screenshotPath: string | null = null;
+      if (captureScreenshot) {
+        const ssResult = await sendToFrankenstein('browser.screenshot', {}, timeout) as { path?: string };
+        screenshotPath = ssResult?.path || null;
+        logger.info(`📸 Verification screenshot: ${screenshotPath}`);
+      }
+
+      // Get page text for assertion checking
+      let pageText = '';
+      try {
+        const textResult = await sendToFrankenstein('browser.evaluate', {
+          script: 'document.body.innerText',
+        }, timeout) as { result?: string };
+        pageText = textResult?.result || '';
+      } catch (e) {
+        logger.warn('Could not get page text for verification');
+      }
+
+      // Get page URL
+      let pageUrl = '';
+      try {
+        const urlResult = await sendToFrankenstein('browser.evaluate', {
+          script: 'window.location.href',
+        }, timeout) as { result?: string };
+        pageUrl = urlResult?.result || '';
+      } catch (e) {
+        logger.warn('Could not get page URL for verification');
+      }
+
+      // Perform smart assertion
+      const verificationResult = performSmartVerification(expected, pageText, pageUrl, intent);
+
+      // Record in experience system
+      if (verificationResult.passed) {
+        logger.info(`✅ Verification PASSED: ${verificationResult.reason}`);
+        experience.recordSelectorSuccess('verify:' + verifyType, intent || expected, currentUrl);
+      } else {
+        logger.warn(`❌ Verification FAILED: ${verificationResult.reason}`);
+        experience.recordSelectorFailure('verify:' + verifyType, intent || expected, currentUrl);
+
+        // If Lightning is available and verification failed, consider striking
+        if (lightningState.enabled && !lightningState.isClaudeMode) {
+          lightningState.failureCount++;
+          if (lightningState.failureCount >= lightningState.autoThreshold) {
+            logger.info(`⚡ Auto-triggering Lightning Strike due to verification failure`);
+            await lightningStrike(`Verification failed: ${verificationResult.reason}`);
+          }
+        }
+      }
+
+      return {
+        type: verifyType,
+        expected,
+        passed: verificationResult.passed,
+        reason: verificationResult.reason,
+        pageUrl,
+        screenshotPath,
+        indicators: verificationResult.indicators,
+      };
+    }
 
     default:
       // Check if this is a Frank dynamic tool from the tool bag
@@ -972,6 +1287,7 @@ bridge.on('browser.launched', handleFrankensteinResponse);
 bridge.on('browser.navigated', handleFrankensteinResponse);
 bridge.on('browser.clicked', handleFrankensteinResponse);
 bridge.on('browser.typed', handleFrankensteinResponse);
+bridge.on('browser.selected', handleFrankensteinResponse);
 bridge.on('browser.screenshotted', handleFrankensteinResponse);
 bridge.on('browser.closed', handleFrankensteinResponse);
 bridge.on('browser.error', handleFrankensteinResponse);
@@ -983,6 +1299,36 @@ function handleFrankensteinResponse(message: BridgeMessage) {
     pending.resolve(message);
   }
 }
+
+// =============================================================================
+// Tool Injection Handler - Hot reload new tools from Frankenstein
+// =============================================================================
+bridge.on('tool.inject' as any, (message: BridgeMessage) => {
+  const { tool } = message.payload as {
+    tool: { id: string; name: string; description: string; inputSchema: object }
+  };
+
+  logger.info(`📦 Received new tool: ${tool.name}`);
+
+  // Add to current tool bag if we're executing a plan
+  if (currentPlan && status === 'executing') {
+    const newTool: ToolBagItem = {
+      name: `frank_${tool.name}`,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    };
+
+    // Check if already in bag
+    if (!currentToolBag.some(t => t.name === newTool.name)) {
+      currentToolBag.push(newTool);
+      logger.info(`🧰 Tool bag updated: added ${tool.name} (now ${currentToolBag.length} tools)`);
+
+      // Refresh Frank tools cache
+      frankToolsCacheTime = 0;
+      queryFrankTools();
+    }
+  }
+});
 
 // =============================================================================
 // Igor Spawning (for route-specific workers)

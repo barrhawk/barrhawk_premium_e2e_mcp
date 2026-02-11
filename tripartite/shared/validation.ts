@@ -205,7 +205,8 @@ export function validatePayloadSize(payload: unknown): MessageValidation {
 
 const ALLOWED_ACTIONS = [
   'launch', 'navigate', 'click', 'type', 'screenshot',
-  'close', 'wait', 'scroll', 'select', 'hover'
+  'close', 'wait', 'scroll', 'select', 'hover',
+  'verify', 'execute_intent'
 ];
 
 const MAX_STEPS = 100;
