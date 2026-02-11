@@ -307,6 +307,60 @@ const styles = `
   .badge-passed { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
   .badge-failed { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
   .badge-running { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+  .badge-success { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .badge-error { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+  .badge-info { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+  .badge-muted { background: rgba(113,113,122,0.15); color: #a1a1aa; border: 1px solid rgba(113,113,122,0.3); }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+  }
+  .modal-title { font-size: 1.1rem; font-weight: 600; }
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+  .modal-close:hover { color: var(--text-primary); }
+
+  /* List */
+  .list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .list-item {
+    padding: 0.75rem 1rem;
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  .list-item:hover { background: var(--bg-card-hover); }
 
   /* Tabs */
   .tabs {
@@ -575,6 +629,9 @@ const Sidebar = ({ activePage }: { activePage: string }) => (
       </a>
       <a href="/perf" class={`nav-item ${activePage === 'perf' ? 'active' : ''}`}>
         <span class="nav-icon">⚡</span> Performance
+      </a>
+      <a href="/hub" class={`nav-item ${activePage === 'hub' ? 'active' : ''}`}>
+        <span class="nav-icon">⬢</span> Hub
       </a>
     </nav>
 
@@ -1237,6 +1294,61 @@ app.get('/golden', (c) => {
           <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Loading test cases...</div>
         </div>
       </div>
+    </Layout>
+  );
+});
+
+// Hub Page - Test Orchestration
+app.get('/hub', (c) => {
+  return c.html(
+    <Layout activePage="hub">
+      <div class="header">
+        <h1 class="header-title">Test Hub</h1>
+        <span style="color: var(--text-muted);">Multi-Igor Test Orchestration</span>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Projects</span>
+            <button
+              class="btn btn-primary btn-sm"
+              hx-get="/api/hub/projects/new"
+              hx-target="#hub-modal"
+              hx-swap="innerHTML"
+            >+ New</button>
+          </div>
+          <div id="hub-projects" hx-get="/api/hub/projects" hx-trigger="load" hx-swap="innerHTML">
+            <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Loading projects...</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Recent Runs</span>
+          </div>
+          <div id="hub-runs" hx-get="/api/hub/runs" hx-trigger="load" hx-swap="innerHTML">
+            <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Loading runs...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1rem;">
+        <div class="card-header">
+          <span class="card-title">Targets</span>
+          <button
+            class="btn btn-outline btn-sm"
+            hx-get="/api/hub/targets"
+            hx-target="#hub-targets"
+            hx-swap="innerHTML"
+          >Refresh</button>
+        </div>
+        <div id="hub-targets" hx-get="/api/hub/targets" hx-trigger="load" hx-swap="innerHTML">
+          <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Loading targets...</div>
+        </div>
+      </div>
+
+      <div id="hub-modal"></div>
     </Layout>
   );
 });
@@ -2975,6 +3087,278 @@ app.get('/events', (c) => {
       }
     }
   });
+});
+
+// =============================================================================
+// Hub API Endpoints (proxy to Hub service on port 7010)
+// =============================================================================
+
+const HUB_URL = process.env.HUB_URL || 'http://localhost:7010';
+
+// Hub Projects
+app.get('/api/hub/projects', async (c) => {
+  try {
+    const res = await fetch(`${HUB_URL}/projects`);
+    const data = await res.json() as { projects: any[] };
+
+    if (!data.projects?.length) {
+      return c.html(
+        <div style="color: var(--text-muted); text-align: center; padding: 1rem;">
+          No projects yet. Click "+ New" to create one.
+        </div>
+      );
+    }
+
+    return c.html(
+      <div class="list">
+        {data.projects.map((p: any) => (
+          <div class="list-item" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 500;">{p.name}</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">{p.baseUrl}</div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button
+                class="btn btn-outline btn-sm"
+                hx-get={`/api/hub/projects/${p.id}/targets`}
+                hx-target="#hub-targets"
+                hx-swap="innerHTML"
+              >Targets</button>
+              <button
+                class="btn btn-outline btn-sm"
+                hx-get={`/api/hub/projects/${p.id}/stats`}
+                hx-target="#hub-runs"
+                hx-swap="innerHTML"
+              >Stats</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(
+      <div class="badge badge-error">Hub offline: {error.message}</div>
+    );
+  }
+});
+
+app.get('/api/hub/projects/new', (c) => {
+  return c.html(
+    <div class="modal-overlay" onclick="this.remove()">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <span class="modal-title">Create Project</span>
+          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+        </div>
+        <form hx-post="/api/hub/projects" hx-target="#hub-projects" hx-swap="innerHTML" hx-on--after-request="this.closest('.modal-overlay').remove()">
+          <div style="margin-bottom: 1rem;">
+            <label style="display: block; margin-bottom: 0.5rem;">Project Name</label>
+            <input type="text" name="name" class="input" placeholder="My App" required />
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <label style="display: block; margin-bottom: 0.5rem;">Base URL</label>
+            <input type="text" name="baseUrl" class="input" placeholder="http://localhost:3000" required />
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <label style="display: block; margin-bottom: 0.5rem;">Description</label>
+            <textarea name="description" class="input" rows="2" placeholder="Optional description"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%;">Create Project</button>
+        </form>
+      </div>
+    </div>
+  );
+});
+
+app.post('/api/hub/projects', async (c) => {
+  try {
+    const body = await c.req.parseBody();
+    const res = await fetch(`${HUB_URL}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    // Refresh projects list
+    const listRes = await fetch(`${HUB_URL}/projects`);
+    const data = await listRes.json() as { projects: any[] };
+
+    return c.html(
+      <div class="list">
+        {data.projects.map((p: any) => (
+          <div class="list-item" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 500;">{p.name}</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">{p.baseUrl}</div>
+            </div>
+            <button class="btn btn-outline btn-sm" hx-get={`/api/hub/projects/${p.id}/targets`} hx-target="#hub-targets">Targets</button>
+          </div>
+        ))}
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(<div class="badge badge-error">Error: {error.message}</div>);
+  }
+});
+
+app.get('/api/hub/projects/:id/stats', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const res = await fetch(`${HUB_URL}/projects/${id}/stats`);
+    const data = await res.json() as { stats: any };
+    const s = data.stats;
+
+    return c.html(
+      <div>
+        <div class="stat-card">
+          <div class="stat-label">Targets</div>
+          <div class="stat-value">{s.enabledTargets}/{s.totalTargets}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pass Rate</div>
+          <div class="stat-value">{s.passRate.toFixed(0)}%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Runs</div>
+          <div class="stat-value">{s.totalRuns}</div>
+        </div>
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(<div class="badge badge-error">Error: {error.message}</div>);
+  }
+});
+
+app.get('/api/hub/projects/:id/targets', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const res = await fetch(`${HUB_URL}/targets?projectId=${id}`);
+    const data = await res.json() as { targets: any[] };
+
+    if (!data.targets?.length) {
+      return c.html(<div style="color: var(--text-muted); padding: 1rem;">No targets for this project.</div>);
+    }
+
+    return c.html(
+      <div class="list">
+        {data.targets.map((t: any) => (
+          <div class="list-item">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-weight: 500;">{t.name}</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                  {t.trigger.type} | {t.watchers.length} watcher(s) | {t.assertions.length} assertion(s)
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                {t.lastRunStatus && (
+                  <span class={`badge badge-${t.lastRunStatus === 'passed' ? 'success' : 'error'}`}>
+                    {t.lastRunStatus}
+                  </span>
+                )}
+                <button
+                  class="btn btn-primary btn-sm"
+                  hx-post={`/api/hub/execute/${t.id}`}
+                  hx-target="#hub-runs"
+                  hx-swap="innerHTML"
+                >Run</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(<div class="badge badge-error">Error: {error.message}</div>);
+  }
+});
+
+// Hub Targets
+app.get('/api/hub/targets', async (c) => {
+  try {
+    const res = await fetch(`${HUB_URL}/targets`);
+    const data = await res.json() as { targets: any[] };
+
+    if (!data.targets?.length) {
+      return c.html(<div style="color: var(--text-muted); text-align: center; padding: 1rem;">No targets yet.</div>);
+    }
+
+    return c.html(
+      <div class="list">
+        {data.targets.map((t: any) => (
+          <div class="list-item">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-weight: 500;">{t.name}</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                  {t.trigger.type} trigger | {t.watchers.length} watcher(s)
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span class={`badge ${t.enabled ? 'badge-success' : 'badge-muted'}`}>
+                  {t.enabled ? 'enabled' : 'disabled'}
+                </span>
+                <button class="btn btn-primary btn-sm" hx-post={`/api/hub/execute/${t.id}`} hx-target="#hub-runs">Run</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(<div class="badge badge-error">Hub offline: {error.message}</div>);
+  }
+});
+
+// Hub Runs
+app.get('/api/hub/runs', async (c) => {
+  try {
+    const res = await fetch(`${HUB_URL}/runs?limit=10`);
+    const data = await res.json() as { runs: any[] };
+
+    if (!data.runs?.length) {
+      return c.html(<div style="color: var(--text-muted); text-align: center; padding: 1rem;">No runs yet.</div>);
+    }
+
+    return c.html(
+      <div class="list">
+        {data.runs.map((r: any) => (
+          <div class="list-item">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class={`badge badge-${r.status === 'passed' ? 'success' : r.status === 'failed' ? 'error' : 'info'}`}>
+                  {r.status}
+                </span>
+                <span style="margin-left: 0.5rem; font-size: 0.8rem; color: var(--text-muted);">
+                  {new Date(r.startedAt).toLocaleTimeString()}
+                </span>
+              </div>
+              {r.durationMs && <span style="color: var(--text-muted);">{r.durationMs}ms</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(<div class="badge badge-error">Hub offline: {error.message}</div>);
+  }
+});
+
+// Execute target
+app.post('/api/hub/execute/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const res = await fetch(`${HUB_URL}/execute/${id}`, { method: 'POST' });
+    const data = await res.json() as { runId: string; message: string };
+
+    return c.html(
+      <div>
+        <div class="badge badge-success" style="margin-bottom: 1rem;">Execution started: {data.runId}</div>
+        <div style="color: var(--text-muted);">{data.message}</div>
+      </div>
+    );
+  } catch (error: any) {
+    return c.html(<div class="badge badge-error">Error: {error.message}</div>);
+  }
 });
 
 // Health check
