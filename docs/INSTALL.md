@@ -1,229 +1,117 @@
-# BarrHawk E2E MCP - Installation Guide
+# BarrHawk E2E - Installation Guide
 
-## Quick Install (Claude Code CLI)
+## Prerequisites
 
-### 1. Clone & Build
+- **Bun** (required): `curl -fsSL https://bun.sh/install | bash`
+- **Linux** (recommended): Optimized for X11/Wayland. Mac/Windows experimental.
+- **Playwright browsers**: Installed automatically on first run
 
-```bash
-git clone https://github.com/barrhawk/barrhawk-e2e-mcp.git
-cd barrhawk-e2e-mcp
-npm install
-npm run build
-```
-
-### 2. Add to Claude Code Config
-
-Edit your Claude Code MCP config:
+## Quick Install
 
 ```bash
-# Linux/Mac
-nano ~/.config/claude/claude_desktop_config.json
+# Clone
+git clone git@github.com:barrhawk/barrhawk_premium_e2e_mcp.git
+cd barrhawk_premium_e2e_mcp
 
-# Or find it via Claude Code
-claude config
+# Install dependencies
+bun install
+
+# Start the stack
+bun run barrhawk
 ```
 
-Add BarrHawk to the `mcpServers` section:
+## Stack Modes
 
+```bash
+bun run barrhawk           # Full stack (Bridge, Doctor, Igor, Frank)
+bun run barrhawk --minimal # Lightweight (Bridge + Igor only)
+bun run barrhawk --hub     # Full stack + Test Orchestration Hub
+```
+
+## Verify Installation
+
+```bash
+# Check all components are healthy
+curl http://localhost:7000/health
+
+# Submit a test plan
+curl -X POST http://localhost:7001/plan \
+  -H "Content-Type: application/json" \
+  -d '{"intent":"take a screenshot","url":"https://example.com"}'
+```
+
+## MCP Configuration
+
+### Claude Code
+
+Run the config generator:
+```bash
+./scripts/generate-mcp-configs.sh
+```
+
+Or manually add to `~/.config/claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "barrhawk-e2e": {
-      "command": "node",
-      "args": ["/full/path/to/barrhawk-e2e-mcp/dist/index.js"],
-      "env": {}
+    "barrhawk-frank": {
+      "command": "bun",
+      "args": ["run", "/path/to/barrhawk_premium_e2e_mcp/tripartite/mcp-frank.ts"]
     }
   }
 }
 ```
 
-**Important:** Use the FULL absolute path to `dist/index.js`
+### Cursor / Windsurf
 
-### 3. Restart Claude Code
-
-```bash
-# Kill any running Claude Code instances
-pkill -f "claude"
-
-# Restart
-claude
-```
-
-### 4. Verify Installation
-
-In Claude Code, run:
-```
-/mcp
-```
-
-You should see `barrhawk-e2e` listed with 119 tools.
-
----
-
-## Tool Categories (119 Total)
-
-| Category | Tools | Prefix |
-|----------|-------|--------|
-| Browser Automation | 36 | `browser_*`, `worker_*` |
-| Database (PostgreSQL) | 6 | `db_pg_*` |
-| Database (SQLite) | 4 | `db_sqlite_*` |
-| Database (Redis) | 8 | `db_redis_*` |
-| GitHub | 18 | `gh_*` |
-| Docker | 18 | `docker_*`, `compose_*` |
-| Filesystem | 19 | `fs_*` |
-| MCP Orchestration | 10 | `mcp_*` |
-
----
-
-## Optional: External Services
-
-### PostgreSQL (for `db_pg_*` tools)
-
-```bash
-# Docker
-docker run -d --name postgres \
-  -e POSTGRES_PASSWORD=secret \
-  -p 5432:5432 \
-  postgres:16
-
-# Then in Claude:
-# db_pg_connect with host: localhost, password: secret
-```
-
-### Redis (for `db_redis_*` tools)
-
-```bash
-docker run -d --name redis -p 6379:6379 redis:7
-
-# Then in Claude:
-# db_redis_connect with host: localhost
-```
-
-### GitHub (for `gh_*` tools)
-
-1. Create a Personal Access Token at https://github.com/settings/tokens
-2. Use `gh_connect` with your token
-
-```
-gh_connect with token: ghp_xxxxxxxxxxxx
-```
-
-### Docker (for `docker_*` tools)
-
-Docker daemon must be running:
-
-```bash
-# Check if running
-docker ps
-
-# Start if needed (systemd)
-sudo systemctl start docker
-```
-
----
-
-## Configuration File
-
-BarrHawk looks for `barrhawk.config.json` in the working directory:
-
+Add to your MCP settings:
 ```json
 {
-  "browser": {
-    "headless": false,
-    "defaultTimeout": 30000,
-    "viewport": {
-      "width": 1280,
-      "height": 720
-    }
-  },
-  "screenshots": {
-    "directory": "./screenshots",
-    "maxDimension": 1500
-  },
-  "selfHealing": {
-    "enabled": true,
-    "minConfidence": 0.7
+  "barrhawk": {
+    "command": "bun",
+    "args": ["run", "/path/to/barrhawk_premium_e2e_mcp/tripartite/mcp-frank.ts"]
   }
 }
 ```
 
----
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BRIDGE_URL` | `ws://localhost:7000` | Bridge WebSocket URL |
+| `EXPERIENCE_DIR` | `/home/raptor/federal/barrhawk_e2e_premium_mcp/experiencegained` | Experience data storage |
+| `ANTHROPIC_API_KEY` | - | Required for Lightning Strike mode |
+| `LIGHTNING_ENABLED` | `true` | Enable Igor → Claude escalation |
+
+## Ports
+
+| Port | Component | Description |
+|------|-----------|-------------|
+| 7000 | Bridge | Message bus, dashboard |
+| 7001 | Doctor | Plan generation |
+| 7002 | Igor | Plan execution |
+| 7003 | Frankenstein | Browser control |
+| 7010 | Hub | Test orchestration (--hub mode) |
+| 7011 | Coordinator | Multi-Igor sync (--hub mode) |
+| 7012 | Igor-DB | Database watcher (--hub mode) |
 
 ## Troubleshooting
 
-### "Tool not found"
-
-Make sure the path in `claude_desktop_config.json` is absolute:
-```json
-// ✗ Wrong
-"args": ["./dist/index.js"]
-
-// ✓ Correct
-"args": ["/home/user/barrhawk-e2e-mcp/dist/index.js"]
-```
-
-### "Cannot find module"
-
-Rebuild:
+### Stack won't start
 ```bash
-npm run clean
-npm install
-npm run build
+# Kill any existing processes
+pkill -f "bun.*tripartite"
+
+# Check if ports are in use
+lsof -i :7000-7003
 ```
 
-### Browser doesn't launch
-
-Install Playwright browsers:
+### Playwright not found
 ```bash
-npx playwright install chromium
+bunx playwright install chromium
 ```
 
-### Permission denied (Linux)
-
+### Experience not saving
+Check `EXPERIENCE_DIR` exists and is writable:
 ```bash
-# For Chrome sandbox
-sudo sysctl -w kernel.unprivileged_userns_clone=1
-
-# Or run headless
-# Set headless: true in config
+mkdir -p $EXPERIENCE_DIR
 ```
-
----
-
-## Example Usage
-
-Once installed, try these in Claude Code:
-
-```
-# Launch browser and navigate
-browser_launch
-browser_navigate to https://example.com
-browser_screenshot
-
-# Database operations
-db_sqlite_open path: ./test.db
-db_sqlite_query query: "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
-db_sqlite_query query: "INSERT INTO users (name) VALUES ('Alice')"
-db_sqlite_query query: "SELECT * FROM users"
-
-# Filesystem
-fs_list path: /home
-fs_search path: . pattern: "*.json"
-
-# Docker (if running)
-docker_ps
-docker_images
-```
-
----
-
-## Version
-
-**v0.4.0-abcd** - Full SDLC MCP with 119 tools
-
-- Browser: Playwright parity + Squad Mode
-- Database: PostgreSQL, SQLite, Redis
-- GitHub: Full API
-- Docker: Containers + Compose
-- Filesystem: Advanced operations
-- Orchestration: MCP hub routing

@@ -2,6 +2,58 @@
 
 All notable changes to BarrHawk E2E will be documented in this file.
 
+## [0.5.0] - 2026-02-11
+
+### Added
+
+- **Unified CLI** - Single `bun run barrhawk` command starts the entire stack
+  - `--hub` flag for test orchestration mode (ports 7010-7012)
+  - `--minimal` flag for lightweight Bridge + Igor only
+
+- **Integrated Dashboard** - Dashboard now embedded in Bridge at `/dashboard`
+  - Real-time component status
+  - Message flow visualization
+  - Hub integration view
+
+- **Test Orchestration Hub** - Multi-Igor coordination system
+  - Project/Target/TestRun management
+  - Barrier synchronization for parallel tests
+  - Database watcher Igor variant
+
+- **Experience System Fully Wired** - B→A escalation complete
+  - Selector success/failure tracking in Igor
+  - Experience-based timeout recommendations in Doctor
+  - Site pattern recognition
+
+- **Tool Injection** - New tools broadcast to running Igors in real-time
+  - Frankenstein → Bridge → all active Igors
+  - Hot-reload tool bags during execution
+
+- **Lightning Strike Feedback** - Igor thoughts flow to Doctor
+  - Claude reasoning captured and stored
+  - Error patterns learned from stuck states
+
+- **Tool Persistence** - Igorified tools saved to disk
+  - Auto-load on Frankenstein startup
+  - Stats preserved across restarts
+
+### Changed
+
+- **Package.json** - Simplified scripts, removed old build targets
+- **Project structure** - Removed 62k+ lines of stale code:
+  - Deleted `src/` (old monolithic MCP)
+  - Deleted `server.ts`, `system-tools.ts`
+  - Deleted `scripts/legacy/`
+  - Deleted `packages/supervisor/`, `packages/dashboard-min/`
+  - Deleted duplicate observability dashboards
+
+### Fixed
+
+- Bridge HTTP handler now async for proper request handling
+- bun:sqlite compatibility (replaced better-sqlite3)
+
+---
+
 ## [0.4.0] - 2026-02-01
 
 ### Added
