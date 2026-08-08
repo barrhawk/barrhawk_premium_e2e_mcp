@@ -19,6 +19,8 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import WebSocket from 'ws';
+import fs from 'fs';
+import path from 'path';
 import { generateId } from './shared/types.js';
 import {
   analyzeSwarmNeed,
@@ -774,6 +776,30 @@ const TOOLS: Tool[] = [
 
 let toolsEnabled = true;
 
+try {
+  if (
+    process.env.BARRHAWK_TOOLS_ENABLED === 'false' ||
+    process.env.BARRHAWK_START_DARK === 'true' ||
+    process.env.BARRHAWK_MCP_DISABLED === 'true'
+  ) {
+    toolsEnabled = false;
+  } else {
+    const configPath = path.join(process.cwd(), 'barrhawk.config.json');
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (
+        config.toolsEnabled === false ||
+        config.mcp?.toolsEnabled === false ||
+        config.mcp?.enabled === false
+      ) {
+        toolsEnabled = false;
+      }
+    }
+  }
+} catch (err) {
+  // Silent fallback
+}
+
 const WAKE_UP_TOOL: Tool = {
   name: 'frank_wake_up',
   description: 'Wake up the BarrHawk tools. Use this if you need to perform testing actions but the tools are currently hibernating to save context.',
@@ -1259,6 +1285,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   console.error(`[MCP-Frank] Starting v${VERSION}`);
   console.error(`[MCP-Frank] Bridge URL: ${BRIDGE_URL}`);
+  console.error(`[MCP-Frank] Initial tools state: ${toolsEnabled ? 'ACTIVE' : 'HIBERNATING (Dark Mode)'}`);
 
   // Try to connect to Bridge
   const connected = await bridge.connect();

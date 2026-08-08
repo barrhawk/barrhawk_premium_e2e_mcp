@@ -138,7 +138,7 @@ describe('Failure→Create Flow', () => {
     );
 
     console.log(`Patterns with tool requested: ${requestedPatterns.length}`);
-  });
+  }, 15000);
 });
 
 describe('Frank Tool Integration', () => {

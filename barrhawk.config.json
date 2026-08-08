@@ -1,4 +1,5 @@
 {
+  "toolsEnabled": false,
   "browser": {
     "headless": false,
     "viewport": {
